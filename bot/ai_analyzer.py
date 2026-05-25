@@ -204,6 +204,13 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
 - 最终标签（可做/观察/回避）由后端根据双轨评分算法计算，你不需要给出
 - **热门板块识别非常重要**：请务必判断该股票是否涉及当前市场热门板块（如HBM、低空经济、AI算力、固态电池、机器人、合成生物等），如果是，请在hot_sectors中详细展开，说明为什么热门、该股与热门板块的关联，并给出2-3条参考链接
 - reference_links中的url必须是真实存在的公开链接（如东方财富、同花顺、雪球、新浪财经、证券时报等平台的资讯文章），如果不确定链接，url填"#"并注明"请搜索：关键词"
+- **scoring_factors.risk 评分规则**：风险维度的"pos"因素代表降低风险的因素（加分项），"neg"因素代表增加风险的因素（减分项）。技术面过热（高RSI/大涨/高PE）本身是减分项，但以下**定性因素应作为正面风险抵消项（pos）**：
+  - 龙头地位（行业市占率第一/前三、技术领先）
+  - 国家大基金/国家队持仓（国家集成电路产业基金、社保基金、养老金等）
+  - 机构重仓（公募/北向资金大幅持仓）
+  - 国家政策重点扶持（国产替代、自主可控、新质生产力等政策方向）
+  - 核心专利/技术壁垒/独家供应资格
+  例如：一只芯片龙头股即使RSI偏高，如果它是国家大基金重仓+封装龙头，risk维度应包含["国家大基金重仓，政策背书强", "pos"]、["先进封装龙头，技术壁垒高", "pos"]等正面因素，以平衡技术面过热的风险扣分。
 """
 
 
@@ -330,6 +337,19 @@ def analyze_stock(quote: dict, ind: dict, flow: dict, news: list, kline: list = 
 		analysis = json.loads(content)
 		logger.info(f"AI 分析完成: {quote.get('code')} {quote.get('name')}")
 		return analysis
+	except ValueError:
+		# No ``` markers — try raw content, then regex-extract JSON object
+		try:
+			analysis = json.loads(content)
+			logger.info(f"AI 分析完成 (raw JSON): {quote.get('code')} {quote.get('name')}")
+			return analysis
+		except json.JSONDecodeError:
+			m = re.search(r'\{.*\}', content, re.DOTALL)
+			if m:
+				analysis = json.loads(m.group())
+				logger.info(f"AI 分析完成 (regex): {quote.get('code')} {quote.get('name')}")
+				return analysis
+			raise
 	except Exception as e:
 		logger.error(f"DeepSeek API 调用失败: {e}")
 		raise
@@ -489,6 +509,18 @@ def analyze_sector_industry_chain(query: str, top_n: int = 5) -> dict:
         analysis = json.loads(content)
         logger.info(f"产业链分析完成: {query}")
         return analysis
+    except ValueError:
+        try:
+            analysis = json.loads(content)
+            logger.info(f"产业链分析完成 (raw): {query}")
+            return analysis
+        except json.JSONDecodeError:
+            m = re.search(r'\{.*\}', content, re.DOTALL)
+            if m:
+                analysis = json.loads(m.group())
+                logger.info(f"产业链分析完成 (regex): {query}")
+                return analysis
+            raise
     except Exception as e:
         logger.error(f"产业链分析API调用失败: {e}")
         raise
@@ -533,6 +565,18 @@ def recommend_stocks_by_sector(query: str, top_n: int = 3) -> dict:
 		rec = json.loads(content)
 		logger.info(f"板块推荐完成: {query} -> {len(rec.get('stocks', []))} 只股票")
 		return rec
+	except ValueError:
+		try:
+			rec = json.loads(content)
+			logger.info(f"板块推荐完成 (raw): {query}")
+			return rec
+		except json.JSONDecodeError:
+			m = re.search(r'\{.*\}', content, re.DOTALL)
+			if m:
+				rec = json.loads(m.group())
+				logger.info(f"板块推荐完成 (regex): {query}")
+				return rec
+			raise
 	except Exception as e:
 		logger.error(f"板块推荐API调用失败: {e}")
 		raise

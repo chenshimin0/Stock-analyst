@@ -21,9 +21,10 @@ from deep_report import compute_indicators, score_stock, fetch_rich_news, format
 from queue_processor import save_report_to_web
 
 try:
-    from sector_lifecycle import analyze_sector_lifecycle
+    from sector_lifecycle import analyze_sector_lifecycle, analyze_sector_by_name
 except ImportError:
     analyze_sector_lifecycle = None
+    analyze_sector_by_name = None
 
 try:
     from ai_analyzer import analyze_stock
@@ -68,18 +69,19 @@ def regenerate_one(code: str, name: str) -> bool:
     all_news = rich["news_items"] + rich["order_events"] + rich["major_events"]
     order_news = rich["order_events"]
 
+    # Initial sector analysis (from static map or F10 API)
     sector_data = None
     if analyze_sector_lifecycle:
         sector_data = analyze_sector_lifecycle(code)
     sector_bonus = sector_data.get("bonus", 0) if sector_data else 0
     if sector_data:
-        print(f"  Sector: {sector_data.get('sector_name', '')} -> {sector_data.get('phase_cn', '')} ({sector_bonus:+.1f})")
+        print(f"  Initial sector: {sector_data.get('sector_name', '')} -> {sector_data.get('phase_cn', '')} ({sector_bonus:+.1f})")
 
     sc = score_stock(quote, ind, flow, all_news, sector_bonus)
-
     print(f"  Score: {sc['total']} -> {sc['label']}")
     print(f"  News: {len(all_news)} items ({len(order_news)} orders)")
 
+    # AI analysis first
     ai_data = None
     if _AI_AVAILABLE:
         try:
@@ -88,6 +90,22 @@ def regenerate_one(code: str, name: str) -> bool:
             print("  AI analysis done")
         except Exception as e:
             logger.warning(f"AI analysis failed for {code}: {e}")
+
+    # Use AI's first tag as sector name
+    if ai_data and analyze_sector_by_name:
+        tags = ai_data.get("tags", [])
+        if tags:
+            ai_sector = tags[0]
+            current_sector = sector_data.get("sector_name", "") if sector_data else ""
+            if ai_sector != current_sector:
+                print(f"  AI tag sector: '{ai_sector}' (was: '{current_sector}')")
+                new_sd = analyze_sector_by_name(ai_sector, code)
+                if new_sd:
+                    sector_data = new_sd
+                    sector_bonus = sector_data.get("bonus", 0)
+                    sc = score_stock(quote, ind, flow, all_news, sector_bonus)
+                    print(f"  Updated sector: {sector_data.get('sector_name', '')} -> {sector_data.get('phase_cn', '')} ({sector_bonus:+.1f})")
+                    print(f"  Updated score: {sc['total']} -> {sc['label']}")
 
     save_report_to_web(code, name, quote, ind, flow, all_news, sc, kline, ai_data, order_news, sector_data)
     print(f"  Report saved to web backend")

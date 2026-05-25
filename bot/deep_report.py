@@ -166,8 +166,12 @@ def compute_indicators(kline: list) -> dict:
 # Scoring
 # ---------------------------------------------------------------------------
 
-def score_stock(quote: dict, ind: dict, flow: dict, news: list, sector_bonus: float = 0) -> dict:
-    """Dual-track scoring: momentum (40%) + revenue quality (35%) + risk (25%) + sector."""
+def score_stock(quote: dict, ind: dict, flow: dict, news: list, sector_bonus: float = 0,
+                ai_scoring: dict = None) -> dict:
+    """Dual-track scoring: momentum (40%) + revenue quality (35%) + risk (25%) + sector.
+
+    ai_scoring: optional AI-generated scoring_factors for qualitative adjustment.
+    """
     scores = {}
 
     # Momentum
@@ -201,30 +205,43 @@ def score_stock(quote: dict, ind: dict, flow: dict, news: list, sector_bonus: fl
     elif 25 <= pe < 50:
         r += 0.5
     elif pe >= 100:
-        r -= 2.0
+        r -= 1.5
     news_text = " ".join(n.get("title", "") for n in news)
-    if re.search(r"(增长|大增|超预期|扭亏)", news_text):
+    if re.search(r"(增长|大增|超预期|扭亏|上涨|高增|翻倍)", news_text):
         r += 1.0
-    if re.search(r"(下滑|亏损|下降|预亏)", news_text):
+    if re.search(r"(下滑|亏损|下降|预亏|暴跌)", news_text):
         r -= 1.0
     scores["revenue"] = round(max(1, min(10, r)), 1)
 
-    # Risk
-    risk = 6.0
+    # Risk — softened technical penalties for high-growth leaders
+    risk = 7.0
     change = abs(quote.get("change_pct", 0))
     if change > 9:
-        risk -= 2
-    elif change > 5:
-        risk -= 1
-    if quote.get("pe", 0) > 100:
-        risk -= 2
-    if ind.get("rsi", 50) > 80:
         risk -= 1.5
+    elif change > 5:
+        risk -= 0.5
+    if quote.get("pe", 0) > 100:
+        risk -= 1.5
+    if ind.get("rsi", 50) > 80:
+        risk -= 1.0
     elif ind.get("rsi", 50) > 70:
         risk -= 0.5
     if main_net < 0:
         risk -= 0.5
-    scores["risk"] = round(max(1, min(10, risk)), 1)
+
+    # Qualitative adjustment from AI scoring factors
+    if ai_scoring:
+        ai_risk = ai_scoring.get("risk", [])
+        pos_count = sum(1 for item in ai_risk if item[1] == "pos")
+        neg_count = sum(1 for item in ai_risk if item[1] == "neg")
+        if pos_count > neg_count:
+            risk += 1.0 + (pos_count - neg_count) * 0.5
+        elif pos_count > 0:
+            risk += 0.5
+        # Clamp after adjustment
+        risk = max(1, min(10, risk))
+
+    scores["risk"] = round(risk, 1)
 
     total = scores["momentum"] * 0.4 + scores["revenue"] * 0.35 + scores["risk"] * 0.25 + sector_bonus
     label = "回避" if total < 4.5 else ("可做" if total >= 6.5 else "观察")

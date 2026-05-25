@@ -344,17 +344,16 @@ tr:hover{background:#f5f9ff}
       </div>
       {% set sf = scoring_factors or {} %}
       {% set sf_hs = sf.hot_sector or [] %}
-      {% set phase_cn = '' %}
-      {% set sector_name = '' %}
+      {% set ns = namespace(phase_cn='', sector_name='') %}
       {% for f in sf_hs %}
-        {% if '板块周期' in f[0] %}{% set phase_cn = f[0].split(': ')[-1] %}{% endif %}
-        {% if '所属板块' in f[0] %}{% set sector_name = f[0].split(': ')[-1] %}{% endif %}
+        {% if '板块周期' in f[0] %}{% set ns.phase_cn = f[0].split(': ')[-1] %}{% endif %}
+        {% if '所属板块' in f[0] %}{% set ns.sector_name = f[0].split(': ')[-1] %}{% endif %}
       {% endfor %}
-      {% if phase_cn %}
+      {% if ns.phase_cn %}
       <div class="kpi-card">
-        <div class="kpi-label">板块周期{% if sector_name %}<br><span style="font-size:9px;opacity:.7">{{ sector_name }}</span>{% endif %}</div>
-        {% set phase_color = '#ffe085' if phase_cn in ['盘整期','筑底期'] else ('#7fffa8' if phase_cn in ['主升期','启动期'] else ('#ff8080' if phase_cn in ['衰退期','高潮期'] else '#a8d8ff')) %}
-        <div class="kpi-value" style="color:{{ phase_color }};font-size:13px">{{ phase_cn }}</div>
+        <div class="kpi-label">板块周期{% if ns.sector_name %}<br><span style="font-size:9px;opacity:.7">{{ ns.sector_name }}</span>{% endif %}</div>
+        {% set phase_color = '#ffe085' if ns.phase_cn in ['盘整期','筑底期'] else ('#7fffa8' if ns.phase_cn in ['主升期','启动期'] else ('#ff8080' if ns.phase_cn in ['衰退期','高潮期'] else '#a8d8ff')) %}
+        <div class="kpi-value" style="color:{{ phase_color }};font-size:13px">{{ ns.phase_cn }}</div>
       </div>
       {% endif %}
     </div>

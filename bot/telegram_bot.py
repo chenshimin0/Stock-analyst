@@ -250,14 +250,61 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "=== 使用指南 ===\n\n"
-        "603337          -> 分析单只股票\n"
-        "对比 600519 000858 -> 多只股票对比\n"
-        "发送截图        -> OCR识别后自动分析\n\n"
-        "也支持股票名称: 茅台 / 宁德时代 / 杰克科技\n\n"
-        "流程: 代码验证 → 入队 → 数据采集(a-stock-data) → "
-        "分析(china-stock-analyst) → DeepSeek AI → 报告"
+        "=== A股智能分析助手 ===\n\n"
+        "直接发送股票代码或名称即可分析：\n"
+        "  603337              → 分析单只股票\n"
+        "  茅台 / 宁德时代      → 股票名称也支持\n\n"
+        "多只股票对比：\n"
+        "  对比 600519 000858   → 对比分析\n"
+        "  600519 000858        → 两个以上代码自动对比\n"
+        "  推荐 前3             → 精选排名前N只\n\n"
+        "截图识别：\n"
+        "  发送股票列表截图      → OCR自动识别并分析\n\n"
+        "命令：\n"
+        "  /delete <代码>        → 删除指定股票的报告\n"
+        "  /help                → 显示本帮助"
     )
+
+
+async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Delete a stock report by stock code."""
+    if not context.args:
+        await update.message.reply_text("用法: /delete <股票代码>\n例如: /delete 603375")
+        return
+
+    code = context.args[0].strip()
+    if not re.match(r"^\d{6}$", code):
+        await update.message.reply_text(f"无效的股票代码: {code}，请输入6位数字代码。")
+        return
+
+    try:
+        # 1. Fetch all reports and find by stock_code
+        req = urllib.request.Request(
+            f"{WEB_API_URL}/reports",
+            headers={"Content-Type": "application/json"},
+        )
+        resp = urllib.request.urlopen(req, timeout=10)
+        reports = json.loads(resp.read())
+
+        matching = [r for r in reports if r.get("stock_code") == code]
+        if not matching:
+            await update.message.reply_text(f"未找到 {code} 的报告。")
+            return
+
+        report_id = matching[0].get("id")
+        stock_name = matching[0].get("stock_name", code)
+
+        # 2. Delete the report
+        del_req = urllib.request.Request(
+            f"{WEB_API_URL}/reports/{report_id}",
+            method="DELETE",
+        )
+        urllib.request.urlopen(del_req, timeout=10)
+
+        await update.message.reply_text(f"已删除 {stock_name} ({code}) 的报告。")
+    except Exception as e:
+        logger.error(f"Delete failed for {code}: {e}")
+        await update.message.reply_text(f"删除 {code} 失败: {e}")
 
 
 # ============================================================
@@ -475,6 +522,7 @@ def main():
     app.add_error_handler(error_handler)
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
+    app.add_handler(CommandHandler("delete", cmd_delete))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 

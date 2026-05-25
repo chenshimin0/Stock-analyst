@@ -1,0 +1,371 @@
+{
+  "电子": {
+    "bk_code": "BK1201",
+    "constituents": [
+      "603773",
+      "603375"
+    ]
+  },
+  "光学光电子": {
+    "bk_code": "BK1038",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "面板": {
+    "bk_code": "BK1335",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "江西板块": {
+    "bk_code": "BK160",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "昨日高振幅": {
+    "bk_code": "BK1633",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "标准普尔": {
+    "bk_code": "BK879",
+    "constituents": [
+      "603773",
+      "603283"
+    ]
+  },
+  "养老金": {
+    "bk_code": "BK823",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "沪股通": {
+    "bk_code": "BK707",
+    "constituents": [
+      "603773",
+      "603283"
+    ]
+  },
+  "通信技术": {
+    "bk_code": "BK1650",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "显示技术": {
+    "bk_code": "BK1651",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "消费电子概念": {
+    "bk_code": "BK1646",
+    "constituents": [
+      "603773",
+      "603283"
+    ]
+  },
+  "玻璃基板": {
+    "bk_code": "BK1175",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "柔性屏(折叠屏)": {
+    "bk_code": "BK1160",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "CPO概念": {
+    "bk_code": "BK1128",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "复合集流体": {
+    "bk_code": "BK1113",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "先进封装": {
+    "bk_code": "BK1101",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "商业航天": {
+    "bk_code": "BK963",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "MicroLED": {
+    "bk_code": "BK948",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "半导体概念": {
+    "bk_code": "BK917",
+    "constituents": [
+      "603773",
+      "603283",
+      "603375"
+    ]
+  },
+  "MiniLED": {
+    "bk_code": "BK902",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "光刻机(胶)": {
+    "bk_code": "BK884",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "电子烟": {
+    "bk_code": "BK865",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "华为概念": {
+    "bk_code": "BK854",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "小米概念": {
+    "bk_code": "BK833",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "3D玻璃": {
+    "bk_code": "BK881",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "OLED": {
+    "bk_code": "BK840",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "5G概念": {
+    "bk_code": "BK714",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "智能穿戴": {
+    "bk_code": "BK641",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "新材料": {
+    "bk_code": "BK523",
+    "constituents": [
+      "603773"
+    ]
+  },
+  "机械设备": {
+    "bk_code": "BK1205",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "自动化设备": {
+    "bk_code": "BK1237",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "工控设备": {
+    "bk_code": "BK1407",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "江苏板块": {
+    "bk_code": "BK159",
+    "constituents": [
+      "603283",
+      "603375"
+    ]
+  },
+  "小盘成长": {
+    "bk_code": "BK1667",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "小盘股": {
+    "bk_code": "BK1643",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "上证380": {
+    "bk_code": "BK705",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "融资融券": {
+    "bk_code": "BK596",
+    "constituents": [
+      "603283",
+      "603375"
+    ]
+  },
+  "电池技术": {
+    "bk_code": "BK1648",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "高带宽内存": {
+    "bk_code": "BK1152",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "存储芯片": {
+    "bk_code": "BK1137",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "碳化硅": {
+    "bk_code": "BK977",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "第三代半导体": {
+    "bk_code": "BK952",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "无线耳机": {
+    "bk_code": "BK893",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "PCB": {
+    "bk_code": "BK877",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "新能源车": {
+    "bk_code": "BK900",
+    "constituents": [
+      "603283",
+      "603375"
+    ]
+  },
+  "苹果概念": {
+    "bk_code": "BK666",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "特斯拉概念": {
+    "bk_code": "BK644",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "长江三角": {
+    "bk_code": "BK594",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "锂电池概念": {
+    "bk_code": "BK574",
+    "constituents": [
+      "603283"
+    ]
+  },
+  "半导体": {
+    "bk_code": "BK1036",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "模拟芯片设计": {
+    "bk_code": "BK1330",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "2025年报预减": {
+    "bk_code": "BK1678",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "百日新高 ": {
+    "bk_code": "BK1676",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "近期新高": {
+    "bk_code": "BK1674",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "专精特新": {
+    "bk_code": "BK1005",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "机器人概念": {
+    "bk_code": "BK1090",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "民爆概念": {
+    "bk_code": "BK1066",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "汽车芯片": {
+    "bk_code": "BK969",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "传感器": {
+    "bk_code": "BK905",
+    "constituents": [
+      "603375"
+    ]
+  },
+  "国产芯片": {
+    "bk_code": "BK891",
+    "constituents": [
+      "603375"
+    ]
+  }
+}

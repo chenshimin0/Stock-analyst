@@ -29,9 +29,10 @@ except ImportError:
     _AI_AVAILABLE = False
 
 try:
-    from sector_lifecycle import analyze_sector_lifecycle
+    from sector_lifecycle import analyze_sector_lifecycle, analyze_sector_by_name
 except ImportError:
     analyze_sector_lifecycle = None
+    analyze_sector_by_name = None
 
 # ---- config ----
 QUEUE_DIR = os.getenv("QUEUE_DIR", "/Users/shiminchen/stock-analysis-system/backend/queue")
@@ -198,6 +199,7 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                 }
                 if sector_data:
                     scoring_factors["hot_sector_bonus"] = sector_data.get("bonus", 0)
+                    scoring_factors["hot_sector"] = hot_sector_factors
 
             fin_snapshot = ai_data.get("financial_snapshot", {})
             financial_data = {
@@ -264,6 +266,7 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
             "total_score": sc.get("total", 0),
             "label": sc.get("label", ""),
             "scoring_factors": scoring_factors,
+            "sector_data": sector_data,
             "technical_data": {
                 "当前价格": f"{p:.2f} ({change_pct:+.2f}%)",
                 "ATR(14)": f"{atr:.2f} ({atr_pct:.1f}%)",
@@ -303,7 +306,10 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
 # ============================================================
 
 def process_one(code: str, name: str = "") -> bool:
-    """Process a single stock analysis request. Returns True on success."""
+    """Process a single stock analysis request. Returns True on success.
+
+    Flow: data → AI first → extract sector from AI tags → sector lifecycle → score → save.
+    """
     logger.info(f"Processing: {code} {name}")
     try:
         # 1. Data layer (a-stock-data skill APIs)
@@ -322,7 +328,7 @@ def process_one(code: str, name: str = "") -> bool:
         kline = data["kline"]
         sector_data = data.get("sector_data")
 
-        # 2. DeepSeek AI analysis
+        # 2. DeepSeek AI analysis (runs BEFORE final sector resolution)
         ai_data = None
         if _AI_AVAILABLE:
             try:
@@ -331,11 +337,29 @@ def process_one(code: str, name: str = "") -> bool:
             except Exception as e:
                 logger.warning(f"AI analysis failed for {code}, falling back to basic: {e}")
 
-        # 3. Save to web backend
+        # 3. Re-resolve sector from AI tags + re-score with AI qualitative adjustment
+        if ai_data:
+            if analyze_sector_by_name:
+                tags = ai_data.get("tags", [])
+                if tags:
+                    ai_sector = tags[0]
+                    current_sector = sector_data.get("sector_name", "") if sector_data else ""
+                    if ai_sector != current_sector:
+                        logger.info(f"Using AI tag sector: '{ai_sector}' (was: '{current_sector}')")
+                        new_sd = analyze_sector_by_name(ai_sector, code)
+                        if new_sd:
+                            sector_data = new_sd
+
+            sector_bonus = sector_data.get("bonus", 0) if sector_data else 0
+            ai_scoring = ai_data.get("scoring_factors")
+            sc = score_stock(quote, ind, flow, news, sector_bonus, ai_scoring=ai_scoring)
+            logger.info(f"Re-scored with AI factors: total={sc['total']} ({sc['label']})")
+
+        # 4. Save to web backend
         save_report_to_web(code, name, quote, ind, flow, news, sc,
                            kline, ai_data, order_news, sector_data)
 
-        # 4. Print report summary
+        # 5. Print report summary
         report = format_report_text(code)
         logger.info(f"Report generated for {code} {name}\n{report[:500]}...")
 

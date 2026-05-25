@@ -10,8 +10,10 @@ Phases:
   高潮期 (Peak/Climax)    -0.3    衰退期 (Decline)        -0.5
 """
 
+import gzip as _gzip
 import json
 import logging
+import os
 import time
 import urllib.request
 from typing import Optional
@@ -157,8 +159,6 @@ def _get_stock_sector(code: str) -> Optional[str]:
     )
     headers = {"Referer": "https://emweb.securities.eastmoney.com/"}
 
-    import gzip as _gzip
-
     # Try curl_cffi first (TLS impersonation)
     if _CFFI_AVAILABLE:
         try:
@@ -189,6 +189,125 @@ def _get_stock_sector(code: str) -> Optional[str]:
         return None
 
 
+def _get_stock_concept_boards(code: str) -> list:
+    """Get all concept boards for a stock from East Money CoreConception API.
+
+    Returns list of {board_name, board_code, is_precise, board_rank}.
+    Works from mainland China IPs (emweb domain, not push2).
+    """
+    market = "SH" if code.startswith("6") else "SZ"
+    url = (
+        f"https://emweb.securities.eastmoney.com/"
+        f"PC_HSF10/CoreConception/PageAjax?code={market}{code}"
+    )
+    headers = {"Referer": "https://emweb.securities.eastmoney.com/"}
+
+    try:
+        if _CFFI_AVAILABLE:
+            try:
+                resp = cffi_requests.get(url, headers=headers, impersonate="chrome120", timeout=10)
+                if resp.status_code == 200:
+                    raw = resp.content
+                    if raw[:2] == b'\x1f\x8b':
+                        raw = _gzip.decompress(raw)
+                    data = json.loads(raw)
+                    boards = []
+                    for item in data.get("ssbk", []):
+                        boards.append({
+                            "board_name": item.get("BOARD_NAME", ""),
+                            "board_code": f"BK{item['BOARD_CODE']}" if item.get("BOARD_CODE") else "",
+                            "is_precise": item.get("IS_PRECISE", "0") == "1",
+                            "board_rank": item.get("BOARD_RANK", 99),
+                        })
+                    return boards
+            except Exception:
+                pass
+
+        req = urllib.request.Request(url, headers=headers)
+        resp = urllib.request.urlopen(req, timeout=10)
+        raw = resp.read()
+        if raw[:2] == b'\x1f\x8b':
+            raw = _gzip.decompress(raw)
+        data = json.loads(raw)
+        boards = []
+        for item in data.get("ssbk", []):
+            boards.append({
+                "board_name": item.get("BOARD_NAME", ""),
+                "board_code": f"BK{item['BOARD_CODE']}" if item.get("BOARD_CODE") else "",
+                "is_precise": item.get("IS_PRECISE", "0") == "1",
+                "board_rank": item.get("BOARD_RANK", 99),
+            })
+        return boards
+    except Exception as e:
+        logger.warning(f"get_stock_concept_boards failed for {code}: {e}")
+        return []
+
+
+# ---- dynamic board cache (grows organically as stocks are analyzed) ----
+_board_dynamic_cache = None
+_board_cache_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "board_cache.json")
+
+
+def _load_board_cache() -> dict:
+    """Load the growing dynamic board cache from disk."""
+    global _board_dynamic_cache
+    if _board_dynamic_cache is not None:
+        return _board_dynamic_cache
+    try:
+        if os.path.exists(_board_cache_file):
+            with open(_board_cache_file, "r") as f:
+                _board_dynamic_cache = json.load(f)
+            logger.info(f"Board cache loaded: {len(_board_dynamic_cache)} boards")
+        else:
+            _board_dynamic_cache = {}
+    except Exception as e:
+        logger.warning(f"Failed to load board cache: {e}")
+        _board_dynamic_cache = {}
+    return _board_dynamic_cache
+
+
+def _save_board_cache():
+    """Persist the dynamic board cache to disk."""
+    global _board_dynamic_cache
+    try:
+        with open(_board_cache_file, "w") as f:
+            json.dump(_board_dynamic_cache, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        logger.warning(f"Failed to save board cache: {e}")
+
+
+def _update_board_cache_from_stock(code: str) -> dict:
+    """Fetch a stock's concept boards and add the stock to each board's cache.
+
+    Returns the updated cache dict.
+    """
+    cache = _load_board_cache()
+    concepts = _get_stock_concept_boards(code)
+    if not concepts:
+        return cache
+
+    updated = False
+    for c in concepts:
+        name = c["board_name"]
+        bk = c["board_code"]
+        if not name or not bk:
+            continue
+        if name not in cache:
+            cache[name] = {"bk_code": bk, "constituents": []}
+        entry = cache[name]
+        if "bk_code" not in entry or not entry["bk_code"]:
+            entry["bk_code"] = bk
+        if code not in entry.setdefault("constituents", []):
+            entry["constituents"].append(code)
+            updated = True
+
+    if updated:
+        _save_board_cache()
+        logger.info(f"Board cache updated from {code}: {len(concepts)} concepts")
+
+    return cache
+
+
 def _load_sector_map() -> dict:
     """Load sector mapping from static JSON file (primary) or live API (fallback)."""
     global _board_map_cache, _board_map_cache_time
@@ -198,7 +317,6 @@ def _load_sector_map() -> dict:
         return _board_map_cache
 
     # 1. Try static JSON file (deployed with server, no API dependency)
-    import os
     map_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), "sector_map.json")
     try:
         if os.path.exists(map_file):
@@ -253,21 +371,72 @@ def _fetch_board_map_live() -> Optional[dict]:
         return None
 
 
-def _find_board_code(sector_name: str) -> Optional[str]:
-    """Match a sector name to its BK board code."""
+def _sector_name_variants(name: str) -> list:
+    """Generate search variants for a sector name to enable fuzzy matching.
+
+    "芯片概念" → ["芯片概念", "芯片"] (strips common suffixes)
+    "汽车芯片" → ["汽车芯片"]
+    """
+    variants = [name]
+    import re
+    # Strip common East Money board suffixes
+    base = re.sub(r"(概念|板块|产业|行业|题材)$", "", name).strip()
+    if base and base != name:
+        variants.append(base)
+    return variants
+
+
+def _fuzzy_find_in_dict(name: str, candidates: dict) -> Optional[str]:
+    """Find a matching entry in a {name: info_dict} collection.
+
+    Tries: exact match → substring match → keyword match → suffix-stripped match.
+    Returns the matched name, or None.
+    """
+    # 1. Exact match
+    if name in candidates:
+        return name
+
+    import re
+    base = re.sub(r"[Ⅰ-ⅫⅠ-Ⅻ]+$", "", name).strip()
+
+    # 2. Substring match: "芯片概念" is in "芯片概念Ⅱ" or vice versa
+    for cname in candidates:
+        if base and (base in cname or cname in base):
+            return cname
+
+    # 3. Keyword match: "芯片概念" → "芯片" matches "汽车芯片", "国产芯片"
+    # Extract core keywords (2+ char chunks without common suffixes)
+    suffixes = ["概念", "板块", "产业", "行业", "题材"]
+    keywords = base
+    for sfx in suffixes:
+        if keywords.endswith(sfx):
+            keywords = keywords[:-len(sfx)].strip()
+    if keywords and len(keywords) >= 2 and keywords != base:
+        for cname in candidates:
+            if keywords in cname:
+                return cname
+
+    return None
+
+
+def _find_board_code(sector_name: str, hint_code: str = "") -> Optional[str]:
+    """Match a sector name to its BK board code.
+
+    Checks: static map → dynamic cache → CoreConception via hint_code.
+    """
     smap = _load_sector_map()
     sectors = smap.get("sectors", {})
 
-    # 1. Direct match in static map
-    if sector_name in sectors:
-        return sectors[sector_name].get("bk_code")
+    # 1. Static map
+    match = _fuzzy_find_in_dict(sector_name, sectors)
+    if match:
+        return sectors[match].get("bk_code")
 
-    # 2. Fuzzy match in static sectors
-    import re
-    base = re.sub(r"[Ⅰ-ⅫⅠ-Ⅻ]+$", "", sector_name).strip()
-    for sname, sinfo in sectors.items():
-        if base in sname or sname in base:
-            return sinfo.get("bk_code")
+    # 2. Dynamic board cache
+    cache = _load_board_cache()
+    match = _fuzzy_find_in_dict(sector_name, cache)
+    if match:
+        return cache[match].get("bk_code")
 
     # 3. Try live board list
     boards = smap.get("_boards", {})
@@ -275,38 +444,59 @@ def _find_board_code(sector_name: str) -> Optional[str]:
         live = _fetch_board_map_live()
         if live:
             boards = live.get("_boards", {})
+    match = _fuzzy_find_in_dict(sector_name, boards)
+    if match:
+        return boards[match]
 
-    if sector_name in boards:
-        return boards[sector_name]
-    for bname, bcode in boards.items():
-        if base in bname or bname in base:
-            return bcode
+    # 4. Try CoreConception with hint stock to discover board
+    if hint_code:
+        concepts = _get_stock_concept_boards(hint_code)
+        concept_map = {c["board_name"]: c for c in concepts}
+        match = _fuzzy_find_in_dict(sector_name, concept_map)
+        if match:
+            bk = concept_map[match]["board_code"]
+            if bk:
+                _update_board_cache_from_stock(hint_code)
+                return bk
 
     return None
 
 
-def _get_board_constituents(sector_name: str, top_n: int = 8) -> list:
-    """Get top N constituent stocks for a sector. Uses static map primarily."""
+def _get_board_constituents(sector_name: str, top_n: int = 8, hint_code: str = "") -> list:
+    """Get top N constituent stocks for a sector.
+
+    Checks: static map → dynamic cache → CoreConception fallback.
+    """
     smap = _load_sector_map()
     sectors = smap.get("sectors", {})
 
-    # 1. Static map
-    if sector_name in sectors:
-        cons = sectors[sector_name].get("constituents", [])
+    # 1. Static map (exact + fuzzy)
+    match = _fuzzy_find_in_dict(sector_name, sectors)
+    if match:
+        cons = sectors[match].get("constituents", [])
         if cons:
             return cons[:top_n]
 
-    # 2. Fuzzy match in static map
-    import re
-    base = re.sub(r"[Ⅰ-ⅫⅠ-Ⅻ]+$", "", sector_name).strip()
-    for sname, sinfo in sectors.items():
-        if base in sname or sname in base:
-            cons = sinfo.get("constituents", [])
+    # 2. Dynamic board cache
+    cache = _load_board_cache()
+    match = _fuzzy_find_in_dict(sector_name, cache)
+    if match:
+        cons = cache[match].get("constituents", [])
+        if cons:
+            return cons[:top_n]
+
+    # 3. Try to seed cache from hint stock
+    if hint_code:
+        _update_board_cache_from_stock(hint_code)
+        cache = _load_board_cache()
+        match = _fuzzy_find_in_dict(sector_name, cache)
+        if match:
+            cons = cache[match].get("constituents", [])
             if cons:
                 return cons[:top_n]
 
-    # 3. Live API fallback
-    bk_code = _find_board_code(sector_name)
+    # 4. Live API fallback
+    bk_code = _find_board_code(sector_name, hint_code)
     if bk_code and _CFFI_AVAILABLE:
         try:
             resp = cffi_requests.get(
@@ -349,7 +539,7 @@ def _compute_composite(stock_codes: list) -> Optional[dict]:
         if ind:
             all_inds.append(ind)
 
-    if len(all_inds) < 2:
+    if len(all_inds) < 1:
         return None
 
     n = len(all_inds)
@@ -474,6 +664,61 @@ def _detect_phase(comp: dict) -> dict:
 
 
 # ============================================================
+# Direct sector analysis (by name, bypassing stock→sector detection)
+# ============================================================
+
+def analyze_sector_by_name(sector_name: str, code: str = "") -> Optional[dict]:
+    """Analyze a named sector directly — used when sector is known (e.g. from AI tags).
+
+    If code is provided, uses it to dynamically discover the board via CoreConception
+    and seed the growing cache. This allows the system to handle any AI tag without
+    needing manual mapping entries.
+
+    Returns None if analysis can't be performed (non-blocking).
+    Returns dict with: phase, phase_cn, bonus, signals, sector_name, trend_strength
+    """
+    try:
+        # 0. Seed dynamic cache from this stock (grows organically over time)
+        if code:
+            _update_board_cache_from_stock(code)
+
+        # 1. Find board code (with hint code for CoreConception fallback)
+        bk_code = _find_board_code(sector_name, code)
+        if not bk_code:
+            logger.info(f"No board code match for sector '{sector_name}'")
+            return None
+
+        # 2. Get top constituents (with hint code for cache seeding)
+        constituents = _get_board_constituents(sector_name, top_n=8, hint_code=code)
+        if not constituents:
+            logger.info(f"No constituents found for sector '{sector_name}'")
+            return None
+
+        # 3. Compute composite indicators (allow single-stock for dynamic boards)
+        comp = _compute_composite(constituents)
+        if not comp:
+            logger.info(f"Insufficient data to compute composite for {bk_code}")
+            return None
+
+        # 4. Detect phase
+        result = _detect_phase(comp)
+        result["sector_name"] = sector_name
+        result["bk_code"] = bk_code
+        result["constituents_count"] = comp["stocks_analyzed"]
+
+        logger.info(
+            f"Sector lifecycle for '{sector_name}' ({bk_code}): "
+            f"{result['phase_cn']} bonus={result['bonus']:+.1f} "
+            f"({comp['stocks_analyzed']} stocks)"
+        )
+        return result
+
+    except Exception as e:
+        logger.warning(f"analyze_sector_by_name failed for '{sector_name}': {e}")
+        return None
+
+
+# ============================================================
 # Main entry point
 # ============================================================
 
@@ -484,42 +729,24 @@ def analyze_sector_lifecycle(code: str) -> Optional[dict]:
     Returns dict with: phase, phase_cn, bonus, signals, sector_name, trend_strength
     """
     try:
-        # 1. Get sector name
-        sector_name = _get_stock_sector(code)
+        # 1. Get sector name — check static stock→sector mapping first, then F10 API
+        smap = _load_sector_map()
+        stock_map = smap.get("stock_map", {})
+        raw_sector = stock_map.get(code)
+        if isinstance(raw_sector, list):
+            sector_name = raw_sector[0] if raw_sector else None
+        else:
+            sector_name = raw_sector
+        if sector_name:
+            logger.info(f"Using mapped sector for {code}: {sector_name}")
+        else:
+            sector_name = _get_stock_sector(code)
         if not sector_name:
             logger.info(f"No sector found for {code}")
             return None
 
-        # 2. Find board code
-        bk_code = _find_board_code(sector_name)
-        if not bk_code:
-            logger.info(f"No board code match for sector '{sector_name}' ({code})")
-            return None
-
-        # 3. Get top constituents
-        constituents = _get_board_constituents(sector_name, top_n=8)
-        if not constituents:
-            logger.info(f"No constituents found for sector '{sector_name}'")
-            return None
-
-        # 4. Compute composite indicators
-        comp = _compute_composite(constituents)
-        if not comp:
-            logger.info(f"Insufficient data to compute composite for {bk_code}")
-            return None
-
-        # 5. Detect phase
-        result = _detect_phase(comp)
-        result["sector_name"] = sector_name
-        result["bk_code"] = bk_code
-        result["constituents_count"] = comp["stocks_analyzed"]
-
-        logger.info(
-            f"Sector lifecycle for {code} ({sector_name}/{bk_code}): "
-            f"{result['phase_cn']} bonus={result['bonus']:+.1f} "
-            f"({comp['stocks_analyzed']} stocks)"
-        )
-        return result
+        # 2-4. Delegate to shared analysis function
+        return analyze_sector_by_name(sector_name, code)
 
     except Exception as e:
         logger.warning(f"Sector lifecycle analysis failed for {code}: {e}")
