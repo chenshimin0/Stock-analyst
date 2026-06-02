@@ -23,7 +23,7 @@ from astock_data import get_quote
 from deep_report import build_analysis_data, format_report_text, score_stock
 
 try:
-    from ai_analyzer import analyze_stock
+    from ai_analyzer import analyze_stock, analyze_stock_natural
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -35,7 +35,7 @@ except ImportError:
     analyze_sector_by_name = None
 
 # ---- config ----
-QUEUE_DIR = os.getenv("QUEUE_DIR", "/Users/shiminchen/stock-analysis-system/backend/queue")
+QUEUE_DIR = os.getenv("QUEUE_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", "queue"))
 WEB_API_URL = os.getenv("WEB_API_URL", "http://localhost:8000/api")
 POLL_INTERVAL = int(os.getenv("QUEUE_POLL_INTERVAL", "15"))  # seconds
 
@@ -59,10 +59,37 @@ def _make_slug_safe(name: str) -> str:
         return name.replace(" ", "")
 
 
+def _build_default_experts(ind: dict, p: float, ma20: float,
+                            stop_loss: float = None, atr_pct: float = 0) -> dict:
+    """Build default expert opinions dict from technical indicators."""
+    return {
+        "技术分析派": {
+            "conclusion": "MA多头排列" if ind.get("ma5", 0) > ind.get("ma20", 0) else "短期整理中",
+            "key_points": [
+                "当前价 {:.2f}，MA5={:.2f}，MA20={:.2f}".format(p, ind.get("ma5", 0), ind.get("ma20", 0)),
+                "MACD DIF={:.3f}，{}状态".format(ind.get("dif", 0), "金叉" if ind.get("macd_bar", 0) > 0 else "死叉"),
+                "RSI={:.1f}，{}".format(ind.get("rsi", 0), "偏多" if ind.get("rsi", 0) >= 50 else "偏弱"),
+                "量比={:.2f}".format(ind.get("vol_ratio", 0)),
+            ],
+        },
+        "风险控制官": {
+            "conclusion": "止损={:.2f}".format(stop_loss) if stop_loss else "数据不足",
+            "key_points": [
+                "建议止损: {:.2f}".format(stop_loss) if stop_loss else "待定",
+                "MA20支撑: {:.2f}".format(ma20) if ma20 > 0 else "待定",
+            ],
+        },
+    }
+
+
 def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                        flow: dict, news: list, sc: dict, kline: list = None,
                        ai_data: dict = None, order_news: list = None,
-                       sector_data: dict = None):
+                       sector_data: dict = None, concept_boards: list = None,
+                       filtered_concept_boards: list = None,
+                       data_10jqka: dict = None, financial_data_raw: dict = None,
+                       peer_comparison_raw: dict = None,
+                       revenue_composition: dict = None):
     """Save the complete analysis report to the web backend."""
     try:
         p = quote.get("price", 0)
@@ -150,47 +177,63 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                 hot_sector_factors.append([sig, "pos" if sector_bonus > 0 else ("neg" if sector_bonus < 0 else "neu")])
             scoring_factors["hot_sector"] = hot_sector_factors
 
+        # --- events_data: always built from news, regardless of AI ---
+        events_data = []
+        seen_titles = set()
+        if order_news:
+            for n in order_news[:5]:
+                title = n.get("title", "")
+                if title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                events_data.append({
+                    "title": title,
+                    "impact": "利好",
+                    "summary": (n.get("content", "") or title)[:200],
+                    "source": n.get("source", "公告"),
+                    "date": n.get("date", ""),
+                    "url": n.get("url", ""),
+                })
+        if news:
+            for n in news[:10]:
+                title = n.get("title", "")
+                if not title or title in seen_titles:
+                    continue
+                seen_titles.add(title)
+                combined = title + (n.get("content", "") or "")
+                impact = "中性"
+                if any(kw in combined for kw in ["增长", "大涨", "突破", "利好", "签约", "中标", "投产", "扭亏", "高增", "回购"]):
+                    impact = "利好"
+                elif any(kw in combined for kw in ["下滑", "亏损", "下降", "预亏", "减持", "处罚", "监管", "问询", "风险"]):
+                    impact = "利空"
+                events_data.append({
+                    "title": title,
+                    "impact": impact,
+                    "summary": (n.get("content", "") or n.get("source", ""))[:200],
+                    "source": n.get("source", ""),
+                    "date": n.get("date", ""),
+                    "url": n.get("url", ""),
+                })
+
         if ai_data:
+            is_markdown_v2 = ai_data.get("_format") == "markdown_v2"
             expert_data = ai_data.get("expert_opinions", {})
             recommendation = ai_data.get("recommendation", {})
-            events_data = []
-            seen_titles = set()
-            if order_news:
-                for n in order_news[:5]:
-                    title = n.get("title", "")
-                    if title in seen_titles:
-                        continue
-                    seen_titles.add(title)
-                    events_data.append({
-                        "title": title,
-                        "impact": "利好",
-                        "summary": (n.get("content", "") or title)[:200],
-                        "source": n.get("source", "公告"),
-                        "date": n.get("date", ""),
-                        "url": n.get("url", ""),
-                    })
-            if news:
-                for n in news[:10]:
-                    title = n.get("title", "")
-                    if not title or title in seen_titles:
-                        continue
-                    seen_titles.add(title)
-                    combined = title + (n.get("content", "") or "")
-                    impact = "中性"
-                    if any(kw in combined for kw in ["增长", "大涨", "突破", "利好", "签约", "中标", "投产", "扭亏", "高增", "回购"]):
-                        impact = "利好"
-                    elif any(kw in combined for kw in ["下滑", "亏损", "下降", "预亏", "减持", "处罚", "监管", "问询", "风险"]):
-                        impact = "利空"
-                    events_data.append({
-                        "title": title,
-                        "impact": impact,
-                        "summary": (n.get("content", "") or n.get("source", ""))[:200],
-                        "source": n.get("source", ""),
-                        "date": n.get("date", ""),
-                        "url": n.get("url", ""),
-                    })
-
             ai_scoring = ai_data.get("scoring_factors", {})
+
+            # Markdown v2: extract expert_data/recommendation from parsed sections
+            if is_markdown_v2:
+                if not expert_data:
+                    expert_data = _build_default_experts(ind, p, ma20, stop_loss, atr_pct)
+                if not recommendation:
+                    rec_text = ai_data.get("recommendation_and_risk", "")
+                    recommendation = {
+                        "short_term": rec_text[:200] if rec_text else "详见AI分析",
+                        "stop_loss": f"{stop_loss:.2f}" if stop_loss else "待定",
+                        "position_advice": "参考AI分析建议",
+                        "risk_warning": f"ATR波动率{atr_pct:.1f}%，注意仓位管理" if atr_pct > 3 else "详见风险提示",
+                    }
+
             if ai_scoring:
                 scoring_factors = {
                     "momentum": ai_scoring.get("momentum", momentum_factors),
@@ -201,7 +244,23 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                     scoring_factors["hot_sector_bonus"] = sector_data.get("bonus", 0)
                     scoring_factors["hot_sector"] = hot_sector_factors
 
+            # Financial snapshot: prefer crawled data for markdown_v2
             fin_snapshot = ai_data.get("financial_snapshot", {})
+            if is_markdown_v2 and not fin_snapshot and financial_data_raw:
+                ann = (financial_data_raw.get("annual") or [])
+                latest_ann = ann[-1] if ann else {}
+                fin_snapshot = {
+                    "revenue": latest_ann.get("revenue", "N/A"),
+                    "revenue_yoy": "{:+.1f}%".format(latest_ann["revenue_yoy"]) if latest_ann.get("revenue_yoy") is not None else "N/A",
+                    "net_profit": latest_ann.get("net_profit", "N/A"),
+                    "net_profit_yoy": "{:+.1f}%".format(latest_ann["net_profit_yoy"]) if latest_ann.get("net_profit_yoy") is not None else "N/A",
+                    "gross_margin": "{:.1f}%".format(latest_ann["gross_margin"]) if latest_ann.get("gross_margin") is not None else "N/A",
+                    "roe": "{:.1f}%".format(latest_ann["roe_weighted"]) if latest_ann.get("roe_weighted") is not None else "N/A",
+                    "debt_ratio": "{:.1f}%".format(latest_ann["debt_ratio"]) if latest_ann.get("debt_ratio") is not None else "N/A",
+                    "dividend_yield": "N/A",
+                    "pe_ttm": str(pe) if pe > 0 else "N/A",
+                    "pb": "N/A",
+                }
             financial_data = {
                 "市盈率(动态)": f"{pe:.1f}倍" if pe > 0 else "N/A",
                 "总市值(亿)": f"{quote.get('total_mv', 0):.1f}" if quote.get('total_mv', 0) > 0 else "N/A",
@@ -252,7 +311,6 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                 "换手率": f"{quote.get('turnover', 0):.2f}%" if quote.get('turnover', 0) else "N/A",
                 "成交量(手)": f"{quote.get('volume', 0) / 1e4:.0f}万" if quote.get('volume', 0) > 0 else "N/A",
             }
-            events_data = []
             ai_analysis = None
 
         payload = {
@@ -288,6 +346,13 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
             "expert_data": expert_data,
             "recommendation": recommendation,
             "ai_analysis": ai_analysis,
+            "concept_boards": concept_boards or [],
+            "filtered_concept_boards": filtered_concept_boards or [],
+            "sector_data": sector_data,
+            "data_10jqka": data_10jqka or {},
+            "financial_data_raw": financial_data_raw or {},
+            "peer_comparison_raw": peer_comparison_raw or {},
+            "revenue_composition_raw": revenue_composition or {},
         }
 
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -327,29 +392,89 @@ def process_one(code: str, name: str = "") -> bool:
         sc = data["sc"]
         kline = data["kline"]
         sector_data = data.get("sector_data")
+        concept_boards = data.get("concept_boards", [])
+        filtered_concept_boards = data.get("filtered_concept_boards", [])
+        data_10jqka = data.get("data_10jqka", {})
+        financial_data = data.get("financial_data", {})
+        peer_comparison = data.get("peer_comparison", {})
+        revenue_composition = data.get("revenue_composition", {})
 
-        # 2. DeepSeek AI analysis (runs BEFORE final sector resolution)
+        # 2. DeepSeek AI analysis — runs both structured JSON + natural Markdown
         ai_data = None
         if _AI_AVAILABLE:
+            # Phase A: structured JSON analysis (primary — all data sections)
             try:
-                ai_data = analyze_stock(quote, ind, flow, news, kline, order_news)
-                logger.info(f"AI analysis done for {code} {name}")
+                ai_data = analyze_stock(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
+                logger.info("AI structured analysis done for %s %s", code, name)
             except Exception as e:
-                logger.warning(f"AI analysis failed for {code}, falling back to basic: {e}")
+                logger.warning("AI structured analysis failed for %s: %s", code, e)
 
-        # 3. Re-resolve sector from AI tags + re-score with AI qualitative adjustment
+            # Phase B: natural Markdown analysis (supplement — narrative sections)
+            try:
+                ai_md = analyze_stock_natural(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
+                if ai_data and ai_md:
+                    # Merge: keep all structured JSON fields, add narrative Markdown sections
+                    ai_data["_format"] = "merged"
+                    for md_key in ["financial_analysis", "business_and_logic",
+                                   "order_and_strategy", "recommendation_and_risk"]:
+                        md_val = ai_md.get(md_key, "")
+                        if md_val:
+                            ai_data["md_" + md_key] = md_val
+                    # Use Markdown tags if more specific than JSON tags
+                    md_tags = ai_md.get("tags", [])
+                    json_tags = ai_data.get("tags", [])
+                    if md_tags and (not json_tags or len(md_tags) > len(json_tags)):
+                        pass  # keep JSON tags (more reliable from structured prompt)
+                    logger.info("AI narrative analysis merged for %s %s", code, name)
+                elif ai_md and not ai_data:
+                    ai_data = ai_md  # fallback: use Markdown if JSON failed
+                    logger.info("AI narrative only (JSON failed) for %s %s", code, name)
+            except Exception as e:
+                logger.warning("AI narrative analysis failed for %s: %s", code, e)
+
+        # 3. Re-resolve sector: try all AI tags against concept boards, pick best match.
+        # Board position matters: earlier boards (index 0) are more relevant to the stock.
+        # Score = text_match_score × (1 + position_weight).
+        if ai_data and analyze_sector_by_name:
+            tags = ai_data.get("tags", [])
+            current_sector = sector_data.get("sector_name", "") if sector_data else ""
+            candidates = []  # (name, score)
+            for idx, board in enumerate(concept_boards):
+                board_name = board["board_name"]
+                # Position weight: first board gets +0.5, decays to 0 at index 20+
+                pos_weight = max(0, 0.5 * (1 - idx / 20))
+                best_tag_score = 0.0
+                for tag in tags:
+                    if tag == current_sector:
+                        continue
+                    if tag in board_name:
+                        # Tag is a substring of board name (e.g. "氟化工" in "氟化工概念")
+                        best_tag_score = max(best_tag_score, 0.95)
+                    elif board_name in tag:
+                        # Board name is a substring of tag
+                        best_tag_score = max(best_tag_score, 0.9)
+                    elif tag and board_name:
+                        # Partial character overlap fallback
+                        overlap = len(set(tag) & set(board_name)) / max(len(tag), len(board_name))
+                        best_tag_score = max(best_tag_score, overlap * 0.7)
+                if best_tag_score > 0:
+                    candidates.append((board_name, best_tag_score * (1 + pos_weight)))
+                elif idx < 5:
+                    # Top-5 boards always considered (low base score from position alone)
+                    if board_name != current_sector:
+                        candidates.append((board_name, 0.3 * (1 + pos_weight)))
+            # Try candidates in score order, pick first valid sector
+            matched = None
+            for cand_name, score in sorted(candidates, key=lambda x: -x[1]):
+                new_sd = analyze_sector_by_name(cand_name, code)
+                if new_sd:
+                    matched = cand_name
+                    sector_data = new_sd
+                    break
+            if matched:
+                logger.info(f"AI tag '{matched}' -> sector '{sector_data.get('sector_name', '')}' (was: '{current_sector}')")
+
         if ai_data:
-            if analyze_sector_by_name:
-                tags = ai_data.get("tags", [])
-                if tags:
-                    ai_sector = tags[0]
-                    current_sector = sector_data.get("sector_name", "") if sector_data else ""
-                    if ai_sector != current_sector:
-                        logger.info(f"Using AI tag sector: '{ai_sector}' (was: '{current_sector}')")
-                        new_sd = analyze_sector_by_name(ai_sector, code)
-                        if new_sd:
-                            sector_data = new_sd
-
             sector_bonus = sector_data.get("bonus", 0) if sector_data else 0
             ai_scoring = ai_data.get("scoring_factors")
             sc = score_stock(quote, ind, flow, news, sector_bonus, ai_scoring=ai_scoring)
@@ -357,10 +482,15 @@ def process_one(code: str, name: str = "") -> bool:
 
         # 4. Save to web backend
         save_report_to_web(code, name, quote, ind, flow, news, sc,
-                           kline, ai_data, order_news, sector_data)
+                           kline, ai_data, order_news, sector_data, concept_boards,
+                           filtered_concept_boards,
+                           data_10jqka, financial_data, peer_comparison,
+                           revenue_composition=revenue_composition)
 
-        # 5. Print report summary
-        report = format_report_text(code)
+        # 5. Print report summary (use updated sc & sector_data)
+        data["sc"] = sc
+        data["sector_data"] = sector_data
+        report = format_report_text(code, data=data)
         logger.info(f"Report generated for {code} {name}\n{report[:500]}...")
 
         return True

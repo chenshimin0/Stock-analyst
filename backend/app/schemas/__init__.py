@@ -20,6 +20,13 @@ class ReportCreate(BaseModel):
     recommendation: Optional[dict] = None
     scoring_factors: Optional[dict] = None
     ai_analysis: Optional[dict] = None
+    concept_boards: Optional[list] = None
+    filtered_concept_boards: Optional[list] = None
+    sector_data: Optional[dict] = None
+    data_10jqka: Optional[dict] = None
+    financial_data_raw: Optional[dict] = None
+    peer_comparison_raw: Optional[dict] = None
+    revenue_composition_raw: Optional[dict] = None
 
 
 class ReportUpdate(BaseModel):
@@ -36,7 +43,8 @@ class ReportUpdate(BaseModel):
     expert_data: Optional[dict] = None
     recommendation: Optional[dict] = None
     scoring_factors: Optional[dict] = None
-    ai_analysis: Optional[dict] = None
+    concept_boards: Optional[list] = None
+    sector_data: Optional[dict] = None
 
 
 class ReportSummary(BaseModel):
@@ -76,6 +84,13 @@ class ReportDetail(BaseModel):
     recommendation: Optional[dict] = None
     scoring_factors: Optional[dict] = None
     ai_analysis: Optional[dict] = None
+    concept_boards: Optional[list] = None
+    filtered_concept_boards: Optional[list] = None
+    sector_data: Optional[dict] = None
+    data_10jqka: Optional[dict] = None
+    financial_data_raw: Optional[dict] = None
+    peer_comparison_raw: Optional[dict] = None
+    revenue_composition_raw: Optional[dict] = None
     created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}

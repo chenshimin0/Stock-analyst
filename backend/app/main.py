@@ -10,6 +10,19 @@ from app.routers import reports, stocks, sector
 
 Base.metadata.create_all(bind=engine)
 
+# Migration: add missing columns if not exists (SQLite)
+try:
+    from sqlalchemy import text, inspect
+    inspector = inspect(engine)
+    cols = [c["name"] for c in inspector.get_columns("reports")]
+    for col_name in ["filtered_concept_boards", "revenue_composition_raw"]:
+        if col_name not in cols:
+            with engine.connect() as conn:
+                conn.execute(text(f"ALTER TABLE reports ADD COLUMN {col_name} JSON"))
+                conn.commit()
+except Exception:
+    pass
+
 app = FastAPI(title="Stock Analysis Report System", version="1.0.0")
 
 app.add_middleware(

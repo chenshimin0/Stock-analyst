@@ -25,6 +25,13 @@ class Report(Base):
     recommendation = Column(JSON, nullable=True)
     scoring_factors = Column(JSON, nullable=True)
     ai_analysis = Column(JSON, nullable=True)
+    concept_boards = Column(JSON, nullable=True)
+    filtered_concept_boards = Column(JSON, nullable=True)
+    sector_data = Column(JSON, nullable=True)
+    data_10jqka = Column(JSON, nullable=True)
+    financial_data_raw = Column(JSON, nullable=True)
+    peer_comparison_raw = Column(JSON, nullable=True)
+    revenue_composition_raw = Column(JSON, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     price_snapshots = relationship("PriceSnapshot", back_populates="report", cascade="all, delete-orphan")

@@ -1,3 +1,4 @@
+import re
 from datetime import date, timedelta
 from typing import Optional
 from sqlalchemy.orm import Session
@@ -11,6 +12,53 @@ from pypinyin import pinyin, Style
 def _make_slug(name: str) -> str:
     initials = pinyin(name, style=Style.FIRST_LETTER)
     return ''.join([i[0].upper() for i in initials])
+
+
+def _filter_concept_boards(concept_boards: list, sector_data: dict = None,
+                            data_10jqka: dict = None, ai_analysis: dict = None,
+                            max_count: int = 10) -> list:
+    """Filter concept boards: hot/trending first, then core boards, max max_count."""
+    if not concept_boards:
+        return []
+    if len(concept_boards) <= max_count:
+        return concept_boards
+
+    hot_keywords = set()
+    if sector_data and sector_data.get("sector_name"):
+        hot_keywords.add(sector_data["sector_name"])
+    if data_10jqka:
+        hot_reason = data_10jqka.get("hot_reason")
+        if hot_reason:
+            for kw in re.split(r'[+、，,]+', hot_reason):
+                kw = kw.strip()
+                if len(kw) >= 2:
+                    hot_keywords.add(kw)
+    if ai_analysis:
+        tags = ai_analysis.get("tags") or []
+        for tag in tags:
+            tag = tag.strip()
+            if len(tag) >= 2:
+                hot_keywords.add(tag)
+
+    filtered = []
+    # Pass 1: hot boards
+    for cb in concept_boards:
+        bn = cb.get("board_name", "") if isinstance(cb, dict) else str(cb)
+        is_hot = any(kw in bn or bn in kw for kw in hot_keywords) if hot_keywords else False
+        if is_hot:
+            filtered.append(cb)
+
+    # Pass 2: core boards
+    seen = {cb.get("board_name", "") if isinstance(cb, dict) else str(cb) for cb in filtered}
+    for cb in concept_boards:
+        bn = cb.get("board_name", "") if isinstance(cb, dict) else str(cb)
+        if bn not in seen:
+            filtered.append(cb)
+            seen.add(bn)
+        if len(filtered) >= max_count:
+            break
+
+    return filtered
 
 
 class ReportService:
@@ -38,6 +86,13 @@ class ReportService:
             existing.recommendation = data.recommendation
             existing.scoring_factors = data.scoring_factors
             existing.ai_analysis = data.ai_analysis
+            existing.concept_boards = data.concept_boards
+            existing.filtered_concept_boards = data.filtered_concept_boards
+            existing.sector_data = data.sector_data
+            existing.data_10jqka = data.data_10jqka
+            existing.financial_data_raw = data.financial_data_raw
+            existing.peer_comparison_raw = data.peer_comparison_raw
+            existing.revenue_composition_raw = data.revenue_composition_raw
             db.commit()
             db.refresh(existing)
             return existing
@@ -60,6 +115,13 @@ class ReportService:
             recommendation=data.recommendation,
             scoring_factors=data.scoring_factors,
             ai_analysis=data.ai_analysis,
+            concept_boards=data.concept_boards,
+            filtered_concept_boards=data.filtered_concept_boards,
+            sector_data=data.sector_data,
+            data_10jqka=data.data_10jqka,
+            financial_data_raw=data.financial_data_raw,
+            peer_comparison_raw=data.peer_comparison_raw,
+            revenue_composition_raw=data.revenue_composition_raw,
         )
         db.add(report)
         db.commit()
@@ -167,6 +229,19 @@ class ReportService:
             "recommendation": report.recommendation,
             "scoring_factors": report.scoring_factors,
             "ai_analysis": report.ai_analysis,
+            "concept_boards": report.concept_boards,
+            "filtered_concept_boards": report.filtered_concept_boards
+            or _filter_concept_boards(
+                report.concept_boards or [],
+                sector_data=report.sector_data,
+                data_10jqka=report.data_10jqka,
+                ai_analysis=report.ai_analysis,
+            ),
+            "sector_data": report.sector_data,
+            "data_10jqka": report.data_10jqka,
+            "financial_data_raw": report.financial_data_raw,
+            "peer_comparison_raw": report.peer_comparison_raw,
+            "revenue_composition_raw": report.revenue_composition_raw,
             "created_at": report.created_at,
             "realtime": price_data,
         }

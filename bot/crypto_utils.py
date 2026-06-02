@@ -42,21 +42,39 @@ def decrypt(encrypted: str, passphrase: str) -> str:
 
 def load_api_key(env_var: str) -> str:
     """从加密文件加载并解密 API Key。
-    加密文件路径: env_var 指向的 .enc 文件
-    passphrase: 从环境变量 SECRET_PASSPHRASE 读取
+    加密文件路径: env_var 指向的 .enc 文件（或同目录下的 deepseek.enc）
+    passphrase: 从环境变量 SECRET_PASSPHRASE 读取（或使用内置默认值）
     """
     enc_path = os.getenv(env_var)
     if not enc_path:
-        raise RuntimeError(f"环境变量 {env_var} 未设置（应指向 .enc 加密文件）")
+        enc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deepseek.enc")
+        if not os.path.exists(enc_path):
+            raise RuntimeError(f"环境变量 {env_var} 未设置（应指向 .enc 加密文件）")
 
     passphrase = os.getenv(_ENV_KEY)
     if not passphrase:
-        raise RuntimeError(f"环境变量 {_ENV_KEY} 未设置，无法解密 API Key")
+        passphrase = "wwFblXr9ZyaobfcjNoZhApJZZqUs52+3"
 
     with open(enc_path, "r") as f:
         encrypted = f.read().strip()
 
     return decrypt(encrypted, passphrase)
+
+
+def load_10jqka_credentials() -> dict:
+    """从加密文件加载同花顺账号密码。返回 {'username': str, 'password': str}"""
+    enc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "10jqka.enc")
+    if not os.path.exists(enc_path):
+        raise RuntimeError("10jqka.enc 加密文件未找到")
+
+    passphrase = os.getenv(_ENV_KEY)
+    if not passphrase:
+        passphrase = "wwFblXr9ZyaobfcjNoZhApJZZqUs52+3"
+
+    with open(enc_path, "r") as f:
+        encrypted = f.read().strip()
+
+    return json.loads(decrypt(encrypted, passphrase))
 
 
 if __name__ == "__main__":

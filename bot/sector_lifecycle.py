@@ -416,13 +416,24 @@ def _fuzzy_find_in_dict(name: str, candidates: dict) -> Optional[str]:
             if keywords in cname:
                 return cname
 
+    # 4. Reverse core-concept match: extract core from candidate names and check if tag contains it
+    # Example: tag "人形机器人" → candidate "机器人概念" → core "机器人" → tag contains "机器人" → match
+    for cname in candidates:
+        ccore = cname
+        for sfx in suffixes:
+            if ccore.endswith(sfx):
+                ccore = ccore[:-len(sfx)].strip()
+        if ccore and len(ccore) >= 2 and ccore != cname and ccore in base:
+            return cname
+
     return None
 
 
-def _find_board_code(sector_name: str, hint_code: str = "") -> Optional[str]:
-    """Match a sector name to its BK board code.
+def _find_board_code(sector_name: str, hint_code: str = "") -> tuple:
+    """Match a sector name to its (bk_code, matched_name) tuple.
 
     Checks: static map → dynamic cache → CoreConception via hint_code.
+    Returns (None, None) if not found.
     """
     smap = _load_sector_map()
     sectors = smap.get("sectors", {})
@@ -430,13 +441,13 @@ def _find_board_code(sector_name: str, hint_code: str = "") -> Optional[str]:
     # 1. Static map
     match = _fuzzy_find_in_dict(sector_name, sectors)
     if match:
-        return sectors[match].get("bk_code")
+        return sectors[match].get("bk_code"), match
 
     # 2. Dynamic board cache
     cache = _load_board_cache()
     match = _fuzzy_find_in_dict(sector_name, cache)
     if match:
-        return cache[match].get("bk_code")
+        return cache[match].get("bk_code"), match
 
     # 3. Try live board list
     boards = smap.get("_boards", {})
@@ -446,7 +457,7 @@ def _find_board_code(sector_name: str, hint_code: str = "") -> Optional[str]:
             boards = live.get("_boards", {})
     match = _fuzzy_find_in_dict(sector_name, boards)
     if match:
-        return boards[match]
+        return boards[match], match
 
     # 4. Try CoreConception with hint stock to discover board
     if hint_code:
@@ -457,7 +468,296 @@ def _find_board_code(sector_name: str, hint_code: str = "") -> Optional[str]:
             bk = concept_map[match]["board_code"]
             if bk:
                 _update_board_cache_from_stock(hint_code)
-                return bk
+                return bk, match
+
+    return None, None
+
+
+def _fetch_constituents_push2(bk_code: str, top_n: int = 8, max_retries: int = 3,
+                               sort_field: str = "f20") -> Optional[list]:
+    """Fetch board constituents from East Money push2 API with retry and backoff.
+
+    Args:
+        bk_code: Board code like BK1036
+        top_n: Number of constituents to fetch
+        max_retries: Maximum attempts (1s → 2s → 4s backoff)
+        sort_field: f20=market_cap, f3=change_pct
+
+    Returns list of stock codes sorted by the given field, or None on all failures.
+    """
+    if not bk_code:
+        return None
+
+    url = "https://push2.eastmoney.com/api/qt/clist/get"
+    params = {
+        "fs": "b:{}".format(bk_code),
+        "fid": sort_field,
+        "po": "1",
+        "pn": "1",
+        "pz": str(top_n),
+        "fields": "f12,f14",
+        "ut": "bd1d9ddb04089700cf9c27f6f7426281",
+    }
+    headers = {
+        "Referer": "https://quote.eastmoney.com/",
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    }
+
+    for attempt in range(max_retries):
+        try:
+            if _CFFI_AVAILABLE:
+                resp = cffi_requests.get(url, params=params, headers=headers,
+                                        impersonate="chrome120", timeout=10)
+                d = json.loads(resp.text)
+            else:
+                import urllib.parse
+                full_url = url + "?" + urllib.parse.urlencode(params)
+                req = urllib.request.Request(full_url, headers=headers)
+                resp_obj = urllib.request.urlopen(req, timeout=10)
+                d = json.loads(resp_obj.read().decode("utf-8"))
+
+            diff = d.get("data", {}).get("diff", {})
+            codes = [item["f12"] for item in diff.values() if item.get("f12")]
+            if codes:
+                logger.info("push2 constituents for %s: %d stocks (sort=%s, attempt=%d)",
+                           bk_code, len(codes), sort_field, attempt + 1)
+                return codes
+            else:
+                logger.warning("push2 empty constituents for %s (attempt %d/%d)",
+                              bk_code, attempt + 1, max_retries)
+        except Exception as e:
+            logger.warning("push2 constituents failed for %s (attempt %d/%d): %s",
+                          bk_code, attempt + 1, max_retries, e)
+
+        if attempt < max_retries - 1:
+            time.sleep(2 ** attempt)  # 1s, 2s, 4s
+
+    return None
+
+
+# ---- Sina Finance node tree cache (independent platform) ----
+_sina_node_cache = None
+_sina_node_cache_time = 0.0
+
+
+def _fetch_board_nodes_sina() -> dict:
+    """Fetch and cache Sina Finance board node tree.
+
+    Returns {board_name: node_id} mapping, preferring concept boards (chgn_*).
+    Cached per _CACHE_TTL (1 hour).
+    """
+    global _sina_node_cache, _sina_node_cache_time
+    now = time.time()
+    if _sina_node_cache is not None and (now - _sina_node_cache_time) < _CACHE_TTL:
+        return _sina_node_cache
+
+    try:
+        url = "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/Market_Center.getHQNodes"
+        req = urllib.request.Request(url, headers={
+            "Referer": "https://finance.sina.com.cn/",
+            "User-Agent": "Mozilla/5.0",
+        })
+        resp = urllib.request.urlopen(req, timeout=15)
+        raw = resp.read().decode("gbk")
+        data = json.loads(raw)
+
+        # data structure: ["行情中心", [A股 categories], [港股...], ...]
+        # A股 categories: [["A股", [["概念板块", [["半导体", "", "chgn_730597"], ...], ...], ...], ...]]
+        nodes = {}
+        for section in data:
+            if not isinstance(section, list):
+                continue
+            for category in section:
+                if not isinstance(category, list) or len(category) < 2:
+                    continue
+                sub_categories = category[1]
+                if not isinstance(sub_categories, list):
+                    continue
+                for sub_cat in sub_categories:
+                    if not isinstance(sub_cat, list) or len(sub_cat) < 2:
+                        continue
+                    boards = sub_cat[1]
+                    if not isinstance(boards, list):
+                        continue
+                    for board in boards:
+                        if isinstance(board, list) and len(board) >= 3:
+                            node_name = str(board[0])
+                            node_id = str(board[2]) if board[2] else ""
+                            if node_id and ("chgn_" in node_id or "sw" in node_id or "hy_" in node_id):
+                                # Prefer chgn_ (concept boards) for wider coverage
+                                existing = nodes.get(node_name, "")
+                                if not existing or ("chgn_" in node_id and "chgn_" not in existing):
+                                    nodes[node_name] = node_id
+
+        _sina_node_cache = nodes
+        _sina_node_cache_time = now
+        logger.info("Sina node tree cached: %d boards", len(nodes))
+        return nodes
+    except Exception as e:
+        logger.warning("Failed to fetch Sina node tree: %s", e)
+        return _sina_node_cache or {}
+
+
+def _fetch_constituents_sina(sector_name: str, top_n: int = 8,
+                              max_retries: int = 2) -> Optional[list]:
+    """Fetch board constituents from Sina Finance (independent from East Money).
+
+    Discovers the board node ID via fuzzy name matching, then queries constituents.
+    Returns list of stock codes, or None on failure.
+    """
+    for attempt in range(max_retries):
+        try:
+            nodes = _fetch_board_nodes_sina()
+            if not nodes:
+                logger.warning("Sina nodes empty (attempt %d/%d)", attempt + 1, max_retries)
+                if attempt < max_retries - 1:
+                    time.sleep(2 ** attempt)
+                continue
+
+            # Fuzzy match sector name → node ID (prefer chgn_ concept boards)
+            suffixes = ["概念", "板块", "产业", "行业", "题材"]
+            base = sector_name
+            for sfx in suffixes:
+                if base.endswith(sfx):
+                    base = base[:-len(sfx)]
+
+            candidates = {}
+            for name, nid in nodes.items():
+                if sector_name == name:
+                    candidates[name] = nid
+                elif "chgn_" in nid and (sector_name in name or name in sector_name):
+                    candidates[name] = nid
+                elif base and len(base) >= 2 and base in name:
+                    candidates[name] = nid
+
+            if not candidates:
+                logger.warning("Sina: no node match for '%s'", sector_name)
+                return None
+
+            # Pick shortest name (closest match), prefer chgn_ prefix
+            best_name = min(candidates.keys(), key=lambda n: (0 if "chgn_" in candidates[n] else 1, len(n)))
+            node_id = candidates[best_name]
+
+            # Query constituents sorted by amount DESC (成交额降序)
+            # This surfaces active/large-cap stocks instead of 北交所 alphabetically
+            api_url = (
+                "http://vip.stock.finance.sina.com.cn/quotes_service/api/json_v2.php/"
+                "Market_Center.getHQNodeData"
+                "?page=1&num={}&sort=amount&asc=0&node={}".format(top_n, node_id)
+            )
+            req = urllib.request.Request(api_url, headers={
+                "Referer": "https://finance.sina.com.cn/",
+                "User-Agent": "Mozilla/5.0",
+            })
+            resp = urllib.request.urlopen(req, timeout=10)
+            raw = resp.read().decode("gbk")
+            data = json.loads(raw)
+
+            if isinstance(data, list):
+                codes = [str(item.get("code", "")) for item in data
+                        if item.get("code") and len(str(item["code"])) == 6]
+                if codes:
+                    logger.info("Sina constituents for '%s' (node=%s): %d stocks (attempt=%d)",
+                               sector_name, node_id, len(codes), attempt + 1)
+                    return codes[:top_n]
+
+            logger.warning("Sina: no constituents for node %s (attempt %d/%d)",
+                          node_id, attempt + 1, max_retries)
+        except Exception as e:
+            logger.warning("Sina constituents failed for '%s' (attempt %d/%d): %s",
+                          sector_name, attempt + 1, max_retries, e)
+
+        if attempt < max_retries - 1:
+            time.sleep(2 ** attempt)
+
+    return None
+
+
+def _sort_by_market_cap_tencent(codes: list, top_n: int = 8) -> Optional[list]:
+    """Sort stock codes by total market cap using Tencent Finance API.
+
+    Batch-queries qt.gtimg.cn for all codes, sorts by market cap DESC,
+    returns top N. Returns None on failure.
+    """
+    if not codes:
+        return None
+
+    prefixed = []
+    for c in codes:
+        if c.startswith(("6", "9")):
+            prefixed.append("sh{}".format(c))
+        elif c.startswith("8"):
+            prefixed.append("bj{}".format(c))
+        else:
+            prefixed.append("sz{}".format(c))
+
+    mcap_map = {}
+    batch_size = 50
+    for i in range(0, len(prefixed), batch_size):
+        batch = prefixed[i:i + batch_size]
+        url = "https://qt.gtimg.cn/q=" + ",".join(batch)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            resp = urllib.request.urlopen(req, timeout=10)
+            raw = resp.read().decode("gbk")
+            for line in raw.strip().split(";"):
+                if '"' not in line or "=" not in line:
+                    continue
+                key = line.split("=")[0].split("_")[-1]
+                raw_code = key[2:]  # strip sh/sz/bj prefix
+                vals = line.split('"')[1].split("~")
+                if len(vals) > 44:
+                    try:
+                        mcap = float(vals[44]) if vals[44] else 0
+                    except (ValueError, IndexError):
+                        mcap = 0.0
+                    mcap_map[raw_code] = mcap
+        except Exception as e:
+            logger.warning("Tencent market cap query failed: %s", e)
+
+    if not mcap_map:
+        return None
+
+    sorted_codes = sorted(mcap_map.keys(), key=lambda c: mcap_map.get(c, 0), reverse=True)
+    logger.info("Tencent sorted %d stocks by market cap, returning top %d",
+               len(sorted_codes), min(top_n, len(sorted_codes)))
+    return sorted_codes[:top_n]
+
+
+def _get_board_constituents_live(sector_name: str, top_n: int = 8,
+                                  bk_code: Optional[str] = None) -> Optional[list]:
+    """Fetch constituents from live APIs with multi-platform retry.
+
+    Priority:
+      1. East Money push2 by market cap (f20) — 3 retries (fast when not blocked)
+      2. Sina Finance (amount-desc) + Tencent market cap sort — works everywhere
+      3. East Money push2 by change% (f3) — 2 retries (same platform alt sort)
+      4. Sina Finance raw (amount-desc) — no Tencent sort
+
+    Returns list of stock codes, or None if all sources fail.
+    """
+    # 1. Primary: push2 sorted by market cap (works from non-blocked IPs)
+    if bk_code:
+        result = _fetch_constituents_push2(bk_code, top_n, max_retries=3, sort_field="f20")
+        if result:
+            return result
+
+    # 2. Sina + Tencent market cap sort (primary for servers where push2 is blocked)
+    # Fetch 4x more from Sina, then use Tencent to pick top N by market cap
+    sina_codes = _fetch_constituents_sina(sector_name, top_n * 4, max_retries=2)
+    if sina_codes:
+        result = _sort_by_market_cap_tencent(sina_codes, top_n)
+        if result:
+            return result
+        # Tencent sort failed — use raw Sina (amount-desc is a reasonable proxy)
+        logger.warning("Tencent sort failed, using raw Sina constituents")
+        return sina_codes[:top_n]
+
+    # 3. push2 with different sort field (last attempt on same platform)
+    if bk_code:
+        result = _fetch_constituents_push2(bk_code, top_n, max_retries=2, sort_field="f3")
+        if result:
+            return result
 
     return None
 
@@ -465,27 +765,27 @@ def _find_board_code(sector_name: str, hint_code: str = "") -> Optional[str]:
 def _get_board_constituents(sector_name: str, top_n: int = 8, hint_code: str = "") -> list:
     """Get top N constituent stocks for a sector.
 
-    Checks: static map → dynamic cache → CoreConception fallback.
+    Always fetches live first (push2 → Sina), falls back to board_cache.json only
+    when all live sources are unreachable.
     """
-    smap = _load_sector_map()
-    sectors = smap.get("sectors", {})
+    # 1. Resolve board code (static map → cache → live discovery)
+    bk_code, _ = _find_board_code(sector_name, hint_code)
 
-    # 1. Static map (exact + fuzzy)
-    match = _fuzzy_find_in_dict(sector_name, sectors)
-    if match:
-        cons = sectors[match].get("constituents", [])
-        if cons:
-            return cons[:top_n]
+    # 2. Live multi-platform fetch (primary path)
+    result = _get_board_constituents_live(sector_name, top_n, bk_code)
+    if result:
+        return result
 
-    # 2. Dynamic board cache
+    # 3. Last resort: board_cache.json (organic cache grown from analyzed stocks)
     cache = _load_board_cache()
     match = _fuzzy_find_in_dict(sector_name, cache)
     if match:
         cons = cache[match].get("constituents", [])
         if cons:
+            logger.info("Using cached constituents for '%s': %d stocks", sector_name, len(cons))
             return cons[:top_n]
 
-    # 3. Try to seed cache from hint stock
+    # 4. Final attempt: seed cache from hint stock's concept boards
     if hint_code:
         _update_board_cache_from_stock(hint_code)
         cache = _load_board_cache()
@@ -494,23 +794,6 @@ def _get_board_constituents(sector_name: str, top_n: int = 8, hint_code: str = "
             cons = cache[match].get("constituents", [])
             if cons:
                 return cons[:top_n]
-
-    # 4. Live API fallback
-    bk_code = _find_board_code(sector_name, hint_code)
-    if bk_code and _CFFI_AVAILABLE:
-        try:
-            resp = cffi_requests.get(
-                f"https://push2.eastmoney.com/api/qt/clist/get?"
-                f"fs=b:{bk_code}&fid=f20&po=1&pn=1&pz={top_n}&fields=f12,f14",
-                headers={"Referer": "https://quote.eastmoney.com/"},
-                impersonate="chrome120",
-                timeout=10,
-            )
-            d = json.loads(resp.text)
-            diff = d.get("data", {}).get("diff", {})
-            return [item["f12"] for item in diff.values() if item.get("f12")]
-        except Exception as e:
-            logger.warning(f"Live constituents failed for {bk_code}: {e}")
 
     return []
 
@@ -683,10 +966,13 @@ def analyze_sector_by_name(sector_name: str, code: str = "") -> Optional[dict]:
             _update_board_cache_from_stock(code)
 
         # 1. Find board code (with hint code for CoreConception fallback)
-        bk_code = _find_board_code(sector_name, code)
+        bk_code, matched_name = _find_board_code(sector_name, code)
         if not bk_code:
             logger.info(f"No board code match for sector '{sector_name}'")
             return None
+
+        # Use the actually-matched board name, not the fuzzy search term
+        resolved_name = matched_name or sector_name
 
         # 2. Get top constituents (with hint code for cache seeding)
         constituents = _get_board_constituents(sector_name, top_n=8, hint_code=code)
@@ -702,12 +988,12 @@ def analyze_sector_by_name(sector_name: str, code: str = "") -> Optional[dict]:
 
         # 4. Detect phase
         result = _detect_phase(comp)
-        result["sector_name"] = sector_name
+        result["sector_name"] = resolved_name
         result["bk_code"] = bk_code
         result["constituents_count"] = comp["stocks_analyzed"]
 
         logger.info(
-            f"Sector lifecycle for '{sector_name}' ({bk_code}): "
+            f"Sector lifecycle for '{resolved_name}' ({bk_code}): "
             f"{result['phase_cn']} bonus={result['bonus']:+.1f} "
             f"({comp['stocks_analyzed']} stocks)"
         )

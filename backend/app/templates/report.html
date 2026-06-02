@@ -309,10 +309,12 @@ tr:hover{background:#f5f9ff}
     <div class="subtitle">深度分析报告 | {{ report_date }}</div>
 
     {% set ai = ai_analysis or {} %}
-    {% if ai.tags %}
+
+    {% set cbs = filtered_concept_boards or concept_boards or [] %}
+    {% if cbs %}
     <div class="hero-tags">
-      {% for t in ai.tags %}
-      <span class="tag">{{ t }}</span>
+      {% for cb in cbs %}
+      <span class="tag" title="{{ cb.board_code or '' }}">{{ cb.board_name }}</span>
       {% endfor %}
     </div>
     {% endif %}
@@ -364,10 +366,13 @@ tr:hover{background:#f5f9ff}
 
 <!-- 一、公司概况 -->
 {% set cp = ai.company_profile or {} %}
-{% if cp.full_name or financial_data %}
+{% if (cp is string and cp) or cp.full_name or financial_data %}
 <div class="section">
   <div class="section-title">一、公司概况</div>
   <div class="card">
+    {% if cp is string %}
+    <div class="insight-box blue">{{ cp | markdown_html }}</div>
+    {% else %}
     <div class="card-grid-3">
       {% if cp.full_name %}
       <div><div class="stat-label">公司名称</div><div class="stat-value" style="font-size:14px">{{ cp.full_name }}</div></div>
@@ -409,6 +414,7 @@ tr:hover{background:#f5f9ff}
     <div style="margin-top:10px;padding:8px;background:#fff8e8;border-radius:8px;font-size:12px">
       <strong>转型期特征：</strong>{{ cp.transition_notes }}
     </div>
+    {% endif %}
     {% endif %}
   </div>
 </div>
@@ -574,11 +580,111 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
+<!-- 真实财务数据（来自东方财富数据中心） -->
+{% set fr = financial_data_raw or {} %}
+{% set fr_annual = fr.annual or [] %}
+{% if fr_annual %}
+<div class="section">
+  <div class="section-title">真实财务数据一览 <span style="font-size:10px;color:#999;font-weight:400">（数据来源：东方财富数据中心）</span></div>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>年度</th>
+          <th class="text-right">营收(亿)</th>
+          <th class="text-right">营收增速</th>
+          <th class="text-right">净利(亿)</th>
+          <th class="text-right">净利增速</th>
+          <th class="text-right">毛利率</th>
+          <th class="text-right">净利率</th>
+          <th class="text-right">ROE</th>
+          <th class="text-right">负债率</th>
+          <th class="text-right">EPS</th>
+          <th class="text-right">研发费用(亿)</th>
+          <th class="text-right">经营现金流(亿)</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in fr_annual %}
+        <tr {% if row.year == '2025' %}style="background:#fff8e8"{% endif %}>
+          <td>{% if row.year == '2025' %}<strong>{{ row.year }}</strong>{% else %}{{ row.year }}{% endif %}</td>
+          <td class="text-right">{{ row.revenue }}</td>
+          <td class="text-right"><span class="{% if row.revenue_yoy and row.revenue_yoy < 0 %}down{% else %}up{% endif %}">{{ row.revenue_yoy }}%</span></td>
+          <td class="text-right">{{ row.net_profit }}</td>
+          <td class="text-right"><span class="{% if row.net_profit_yoy and row.net_profit_yoy < 0 %}down{% else %}up{% endif %}">{{ row.net_profit_yoy }}%</span></td>
+          <td class="text-right">{{ row.gross_margin }}%</td>
+          <td class="text-right">{{ row.net_margin }}%</td>
+          <td class="text-right">{{ row.roe_weighted }}%</td>
+          <td class="text-right">{{ row.debt_ratio }}%</td>
+          <td class="text-right">{{ row.eps }}</td>
+          <td class="text-right">{{ row.rd_expense }}</td>
+          <td class="text-right">{{ row.cf_oper }}</td>
+        </tr>
+        {% endfor %}
+        {% set lq = fr.latest_quarter or {} %}
+        {% if lq and lq.year %}
+        <tr>
+          <td><strong>{{ lq.year }}</strong></td>
+          <td class="text-right">{{ lq.revenue }}</td>
+          <td class="text-right"><span class="{% if lq.revenue_yoy and lq.revenue_yoy < 0 %}down{% else %}up{% endif %}">{{ lq.revenue_yoy }}%</span></td>
+          <td class="text-right">{{ lq.net_profit }}</td>
+          <td class="text-right"><span class="{% if lq.net_profit_yoy and lq.net_profit_yoy < 0 %}down{% else %}up{% endif %}">{{ lq.net_profit_yoy }}%</span></td>
+          <td class="text-right">{{ lq.gross_margin }}%</td>
+          <td class="text-right">{{ lq.net_margin }}%</td>
+          <td class="text-right">{{ lq.roe_weighted }}%</td>
+          <td class="text-right">-</td>
+          <td class="text-right">-</td>
+          <td class="text-right">-</td>
+          <td class="text-right">-</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+<!-- 财务分析（AI深度分析补充 — 嵌入财务数据区，不另起章节） -->
+{% set fin_analysis = ai.financial_analysis or ai.md_financial_analysis or "" %}
+{% if fin_analysis is string and fin_analysis %}
+<div class="card" style="margin-top:12px"><div class="insight-box green">{{ fin_analysis | markdown_html }}</div></div>
+{% endif %}
+
 <!-- 四、业务结构与市场地位 -->
+{% set rc = revenue_composition_raw or {} %}
 {% set biz = ai.business_structure or [] %}
-{% if biz %}
+{% if rc.by_product or biz %}
 <div class="section">
   <div class="section-title">四、业务结构与市场地位</div>
+  {% if rc.by_product %}
+  <div class="card" style="margin-bottom:12px">
+    <div class="stat-label" style="margin-bottom:10px">主营业务构成（{{ rc.report_date or '' }}年报，数据来源：东方财富F10）</div>
+    <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>产品分类</th>
+          <th class="text-right">营收(亿元)</th>
+          <th class="text-right">占比</th>
+          {% if rc.by_product[0].gross_margin_pct is not none %}<th class="text-right">毛利率</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in rc.by_product %}
+        {% set rev_yi = (item.revenue / 100000000)|round(2) %}
+        <tr {% if loop.first %}style="background:#fff8e8;font-weight:600"{% endif %}>
+          <td>{{ item.name }}</td>
+          <td class="text-right">{{ rev_yi }}</td>
+          <td class="text-right" style="color:#1565c0;font-weight:700">{{ item.ratio_pct }}%</td>
+          {% if rc.by_product[0].gross_margin_pct is not none %}<td class="text-right">{{ item.gross_margin_pct }}%</td>{% endif %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+  {% endif %}
+  {% if biz %}
   <div class="card">
     {% for seg in biz %}
     <div class="biz-segment-card">
@@ -599,7 +705,7 @@ tr:hover{background:#f5f9ff}
     </div>
     {% endfor %}
   </div>
-  <!-- 核心竞争优势总结 -->
+  {% endif %}
   {% set advantages = ai.core_competitive_advantages or [] %}
   {% if advantages %}
   <div class="alert green" style="margin-top:12px">
@@ -611,6 +717,11 @@ tr:hover{background:#f5f9ff}
   {% endif %}
 </div>
 {% endif %}
+	<!-- AI业务与投资逻辑深度分析 -->
+	{% set biz_logic = ai.md_business_and_logic or ai.business_and_logic or "" %}
+	{% if biz_logic is string and biz_logic %}
+	<div class="card" style="margin-top:12px"><div class="insight-box blue">{{ biz_logic | markdown_html }}</div></div>
+	{% endif %}
 
 <!-- 五、投资逻辑 -->
 {% set logic = ai.investment_logic or [] %}
@@ -631,7 +742,7 @@ tr:hover{background:#f5f9ff}
 
 <!-- 六、产业前景与竞争格局 -->
 {% set comp = ai.competitive_landscape or {} %}
-{% if comp.market_size or ai.industry_analysis %}
+{% if comp.market_size or comp.market_position or ai.industry_analysis %}
 <div class="section">
   <div class="section-title">六、产业前景与竞争格局</div>
   {% if ai.industry_analysis %}
@@ -677,6 +788,11 @@ tr:hover{background:#f5f9ff}
     {% endif %}
   </div>
   {% endif %}
+</div>
+{% elif comp is string and comp %}
+<div class="section">
+  <div class="section-title">六、产业前景与竞争格局</div>
+  <div class="insight-box blue" style="margin-bottom:10px">{{ comp | markdown_html }}</div>
 </div>
 {% endif %}
 
@@ -764,6 +880,11 @@ tr:hover{background:#f5f9ff}
   {% endif %}
 </div>
 {% endif %}
+	<!-- AI订单与战略深度分析 -->
+	{% set ord_strat = ai.md_order_and_strategy or ai.order_and_strategy or "" %}
+	{% if ord_strat is string and ord_strat %}
+	<div class="card" style="margin-top:12px"><div class="insight-box blue">{{ ord_strat | markdown_html }}</div></div>
+	{% endif %}
 
 <!-- 九、估值展望 -->
 {% if ai.valuation_analysis %}
@@ -932,6 +1053,12 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
+<!-- 十四、操作建议与风险（AI深度分析补充） -->
+{% set rec_risk = ai.md_recommendation_and_risk or ai.recommendation_and_risk or "" %}
+{% if rec_risk is string and rec_risk %}
+<div class="card" style="margin-bottom:12px"><div class="insight-box blue">{{ rec_risk | markdown_html }}</div></div>
+{% endif %}
+
 <!-- 十四、操作建议 -->
 {% set rec = ai.recommendation or recommendation or {} %}
 {% if rec %}
@@ -1040,7 +1167,7 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
-<!-- 十一、风险预警 -->
+<!-- 十五、风险预警 -->
 {% set alerts = ai.risk_alerts or [] %}
 {% if alerts %}
 <div class="section">
@@ -1059,7 +1186,7 @@ tr:hover{background:#f5f9ff}
 <!-- Footer -->
 <div class="footer">
   <p style="margin-bottom:6px"><strong style="color:#c07a00">免责声明：</strong>本报告仅供参考，<strong style="color:#e03535">不构成投资建议</strong>。股市有风险，投资需谨慎。</p>
-  <p>报告日期: {{ report_date }} | 分析标的: {{ stock_name }}({{ stock_code }}) | 数据来源: 公开市场数据 + AI分析</p>
+  <p>报告日期: {{ report_date }} | 分析标的: {{ stock_name }}({{ stock_code }}) | 数据来源: 东方财富数据中心 + 同花顺F10 + 腾讯财经 + AI分析</p>
 </div>
 
 </body>

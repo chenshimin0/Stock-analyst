@@ -16,8 +16,7 @@ sys.path.insert(0, _BOT_DIR)
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("regenerate")
 
-from astock_data import get_quote, get_kline, get_fund_flow
-from deep_report import compute_indicators, score_stock, fetch_rich_news, format_report_text
+from deep_report import build_analysis_data, score_stock, format_report_text
 from queue_processor import save_report_to_web
 
 try:
@@ -27,7 +26,7 @@ except ImportError:
     analyze_sector_by_name = None
 
 try:
-    from ai_analyzer import analyze_stock
+    from ai_analyzer import analyze_stock, analyze_stock_natural
     _AI_AVAILABLE = True
 except ImportError:
     _AI_AVAILABLE = False
@@ -51,67 +50,98 @@ def regenerate_one(code: str, name: str) -> bool:
     print(f"Regenerating {name} ({code})...")
     print(f"{'='*60}")
 
-    quote = get_quote(code)
-    name = quote.get("name", name)
-    price = quote.get("price", 0)
-
-    if not name or price <= 0:
-        print(f"FAILED: Cannot get quote for {code}")
+    # Use build_analysis_data for full data pipeline (10jqka, concept boards, sector, etc.)
+    data = build_analysis_data(code)
+    if not data:
+        print(f"FAILED: Cannot fetch data for {code}")
         return False
 
+    quote = data["quote"]
+    name = data["name"] or name
+    ind = data["ind"]
+    flow = data["flow"]
+    news = data["news"]
+    order_news = data["order_news"]
+    sc = data["sc"]
+    kline = data["kline"]
+    sector_data = data.get("sector_data")
+    concept_boards = data.get("concept_boards", [])
+    filtered_concept_boards = data.get("filtered_concept_boards", [])
+    data_10jqka = data.get("data_10jqka", {})
+    financial_data = data.get("financial_data", {})
+    peer_comparison = data.get("peer_comparison", {})
+    revenue_composition = data.get("revenue_composition", {})
+
+    price = quote.get("price", 0)
     print(f"  Price: {price:.2f} ({quote.get('change_pct', 0):+.2f}%)")
 
-    kline = get_kline(code, 120)
-    ind = compute_indicators(kline) if kline else {}
-    flow = get_fund_flow(code)
-
-    rich = fetch_rich_news(code, name)
-    all_news = rich["news_items"] + rich["order_events"] + rich["major_events"]
-    order_news = rich["order_events"]
-
-    # Initial sector analysis (from static map or F10 API)
-    sector_data = None
-    if analyze_sector_lifecycle:
-        sector_data = analyze_sector_lifecycle(code)
-    sector_bonus = sector_data.get("bonus", 0) if sector_data else 0
     if sector_data:
-        print(f"  Initial sector: {sector_data.get('sector_name', '')} -> {sector_data.get('phase_cn', '')} ({sector_bonus:+.1f})")
+        print(f"  Sector: {sector_data.get('sector_name', '')} -> {sector_data.get('phase_cn', '')} ({sector_data.get('bonus', 0):+.1f})")
+    if concept_boards:
+        names = [c['board_name'] for c in concept_boards[:8]]
+        print(f"  Concepts: {', '.join(names)}")
 
-    sc = score_stock(quote, ind, flow, all_news, sector_bonus)
     print(f"  Score: {sc['total']} -> {sc['label']}")
-    print(f"  News: {len(all_news)} items ({len(order_news)} orders)")
+    print(f"  News: {len(news)} items ({len(order_news)} orders)")
 
-    # AI analysis first
+    # AI analysis — structured JSON (primary) + natural Markdown (supplement)
     ai_data = None
     if _AI_AVAILABLE:
         try:
-            print("  Running AI analysis...")
-            ai_data = analyze_stock(quote, ind, flow, all_news, kline, order_news)
-            print("  AI analysis done")
+            print("  Running AI structured analysis (JSON)...")
+            ai_data = analyze_stock(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
+            print("  AI structured analysis done")
         except Exception as e:
-            logger.warning(f"AI analysis failed for {code}: {e}")
+            logger.warning(f"AI structured analysis failed for {code}: {e}")
 
-    # Use AI's first tag as sector name
+        try:
+            print("  Running AI narrative analysis (Markdown)...")
+            ai_md = analyze_stock_natural(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
+            if ai_data and ai_md:
+                ai_data["_format"] = "merged"
+                for md_key in ["financial_analysis", "business_and_logic",
+                               "order_and_strategy", "recommendation_and_risk"]:
+                    md_val = ai_md.get(md_key, "")
+                    if md_val:
+                        ai_data["md_" + md_key] = md_val
+                print("  AI narrative analysis merged")
+            elif ai_md and not ai_data:
+                ai_data = ai_md
+                print("  AI narrative only (structured failed)")
+        except Exception as e:
+            logger.warning(f"AI narrative analysis failed for {code}: {e}")
+
+    # Re-resolve sector using AI tags
     if ai_data and analyze_sector_by_name:
         tags = ai_data.get("tags", [])
-        if tags:
-            ai_sector = tags[0]
-            current_sector = sector_data.get("sector_name", "") if sector_data else ""
-            if ai_sector != current_sector:
-                print(f"  AI tag sector: '{ai_sector}' (was: '{current_sector}')")
-                new_sd = analyze_sector_by_name(ai_sector, code)
-                if new_sd:
-                    sector_data = new_sd
-                    sector_bonus = sector_data.get("bonus", 0)
-                    sc = score_stock(quote, ind, flow, all_news, sector_bonus)
-                    print(f"  Updated sector: {sector_data.get('sector_name', '')} -> {sector_data.get('phase_cn', '')} ({sector_bonus:+.1f})")
-                    print(f"  Updated score: {sc['total']} -> {sc['label']}")
+        current_sector = sector_data.get("sector_name", "") if sector_data else ""
+        matched = None
+        for tag in tags:
+            if tag == current_sector:
+                continue
+            new_sd = analyze_sector_by_name(tag, code)
+            if new_sd:
+                matched = tag
+                sector_data = new_sd
+                break
+        if matched:
+            print(f"  AI tag '{matched}' -> sector '{sector_data.get('sector_name', '')}' (was: '{current_sector}')")
 
-    save_report_to_web(code, name, quote, ind, flow, all_news, sc, kline, ai_data, order_news, sector_data)
+    # Re-score with AI factors
+    if ai_data:
+        sector_bonus = sector_data.get("bonus", 0) if sector_data else 0
+        ai_scoring = ai_data.get("scoring_factors")
+        sc = score_stock(quote, ind, flow, news, sector_bonus, ai_scoring=ai_scoring)
+        print(f"  Re-scored: {sc['total']} -> {sc['label']}")
+
+    save_report_to_web(code, name, quote, ind, flow, news, sc,
+                       kline, ai_data, order_news, sector_data, concept_boards,
+                       filtered_concept_boards,
+                       data_10jqka, financial_data, peer_comparison,
+                       revenue_composition=revenue_composition)
     print(f"  Report saved to web backend")
 
-    # Print summary
-    print(format_report_text(code)[:300])
+    print(format_report_text(code, data=data)[:300])
 
     return True
 

@@ -7,12 +7,23 @@ News classification + report formatting.
 
 import json
 import logging
+import os
 import re
+import sys
 import urllib.request
 from datetime import date
 from typing import Optional
 
-from astock_data import get_quote, get_kline, get_fund_flow, search_news
+from astock_data import get_quote, get_kline, get_fund_flow, search_news, get_concept_boards, get_financial_data_em, get_peer_comparison_em, get_revenue_composition_em
+from astock_data_10jqka import (
+    get_realtime_10jqka, get_kline_10jqka, get_eps_forecast,
+    get_stock_hot_reason, get_industry_comparison, enrich_quote_10jqka,
+)
+
+# Ensure scripts dir is importable for eastmoney_news_search
+_SCRIPTS_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts")
+if os.path.isdir(_SCRIPTS_DIR) and _SCRIPTS_DIR not in sys.path:
+    sys.path.insert(0, _SCRIPTS_DIR)
 
 logger = logging.getLogger("deep_report")
 
@@ -55,18 +66,85 @@ def classify_news(news_items: list) -> tuple:
 
 
 def fetch_rich_news(code: str, name: str = "") -> dict:
-    """Fetch and classify news from EastMoney search API."""
+    """Fetch and classify news from multiple sources."""
     result = {"news_items": [], "order_events": [], "major_events": []}
-    raw_news = search_news(code, name, page_size=15)
+    all_news = []
+
+    # Source 1: EastMoney search API (astock_data)
+    try:
+        raw_news = search_news(code, name, page_size=15)
+        all_news.extend(raw_news)
+    except Exception as e:
+        logger.warning(f"EastMoney search failed for {code}: {e}")
+
+    # Source 2: EastMoney API via stock_utils (with API key, better results)
+    try:
+        from stock_utils import eastmoney_news_search
+        resp = eastmoney_news_search(
+            question=f"{code} {name}".strip(),
+            stock_code=code,
+            stock_name=name,
+            page_size=15,
+            timeout=8,
+        )
+        if resp.get("success"):
+            for item in resp.get("items", []):
+                all_news.append({
+                    "title": item.get("title", ""),
+                    "content": item.get("trunk", ""),
+                    "source": item.get("source", ""),
+                    "date": item.get("publish_time", ""),
+                    "url": item.get("link", ""),
+                })
+    except Exception as e:
+        logger.debug(f"eastmoney_news_search failed for {code}: {e}")
+
+    # Source 3: akshare 东方财富新闻
+    try:
+        import akshare as ak
+        ak_news = ak.stock_news_em(symbol=code)
+        if ak_news is not None and not ak_news.empty:
+            for _, row in ak_news.head(15).iterrows():
+                all_news.append({
+                    "title": str(row.get("标题", "")),
+                    "content": str(row.get("内容", "")),
+                    "source": str(row.get("来源", "资讯")),
+                    "date": str(row.get("发布时间", "")),
+                    "url": str(row.get("链接", "")),
+                })
+    except Exception as e:
+        logger.debug(f"akshare stock_news_em failed for {code}: {e}")
 
     # Dedup by title
     seen = set()
     unique = []
-    for n in raw_news:
+    for n in all_news:
         key = n.get("title", "")
         if key and key not in seen:
             seen.add(key)
             unique.append(n)
+
+    # Filter out news where target code is misattributed to another company
+    # e.g. a news article writes "高新发展（000682.SZ）" but 000682 is 东方电子
+    if name:
+        _PAT_WRONG_CODE = re.compile(
+            r'([一-鿿]{2,10})[（(]' + re.escape(code) + r'\.[A-Z]{2}[）)]'
+        )
+        filtered = []
+        for n in unique:
+            content = (n.get("title", "") or "") + (n.get("content", "") or "")
+            bad = False
+            for m in _PAT_WRONG_CODE.finditer(content):
+                if m.group(1) != name:
+                    logger.warning(
+                        f"Filtered misattributed news for {code}: "
+                        f"'{m.group(1)}' != '{name}' — {n.get('title', '')[:50]}"
+                    )
+                    bad = True
+                    break
+            if not bad:
+                filtered.append(n)
+        unique = filtered
 
     general, orders, majors = classify_news(unique)
     result["news_items"] = general[:15]
@@ -74,7 +152,7 @@ def fetch_rich_news(code: str, name: str = "") -> dict:
     result["major_events"] = majors[:10]
 
     logger.info(
-        f"Rich news for {code}: news={len(result['news_items'])}, "
+        f"Rich news for {code}: total={len(unique)}, news={len(result['news_items'])}, "
         f"orders={len(result['order_events'])}, majors={len(result['major_events'])}"
     )
     return result
@@ -274,37 +352,212 @@ def build_analysis_data(code: str) -> Optional[dict]:
     all_news = rich["news_items"] + rich["order_events"] + rich["major_events"]
     order_news = rich["order_events"]
 
-    # Sector lifecycle
+    # ---- 10jqka data layer (parallel-friendly, each call has retry) ----
+    data_10jqka = {}
+    eps_forecast = {}
+    hot_reason = None
+    industry_compare = {}
+    kline_10jqka = []
+    quote_10jqka = {}
+
+    try:
+        quote_10jqka = get_realtime_10jqka(code)
+        enrich_quote_10jqka(quote)  # merge 10jqka fields into main quote
+    except Exception as e:
+        logger.debug(f"10jqka realtime skipped: {e}")
+
+    try:
+        kline_10jqka = get_kline_10jqka(code, count=250)
+        logger.info(f"10jqka K-line for {code}: {len(kline_10jqka)} bars")
+    except Exception as e:
+        logger.debug(f"10jqka K-line skipped: {e}")
+
+    try:
+        eps_forecast = get_eps_forecast(code)
+        if eps_forecast:
+            logger.info(f"EPS forecast for {code}: {eps_forecast.get('raw_html_cols', [])}")
+    except Exception as e:
+        logger.debug(f"EPS forecast skipped: {e}")
+
+    try:
+        hot_reason = get_stock_hot_reason(code)
+        if hot_reason:
+            logger.info(f"Hot reason for {code}: {hot_reason}")
+    except Exception as e:
+        logger.debug(f"Hot reason skipped: {e}")
+
+    try:
+        industry_compare = get_industry_comparison(code)
+        if industry_compare:
+            logger.info(f"Industry comparison for {code}: {len(industry_compare.get('tables', []))} tables")
+    except Exception as e:
+        logger.debug(f"Industry comparison skipped: {e}")
+
+    # ---- 10jqka data assembled ----
+    data_10jqka = {
+        "realtime": quote_10jqka,
+        "kline": kline_10jqka,
+        "eps_forecast": eps_forecast,
+        "hot_reason": hot_reason,
+        "industry_compare": industry_compare,
+    }
+
+    # If 10jqka kline has more data, use it for indicator computation
+    # (10jqka provides longer history — up to full history from IPO)
+    if kline_10jqka and len(kline_10jqka) > len(kline):
+        ind_10jqka = compute_indicators(kline_10jqka)
+        if ind_10jqka and "error" not in ind_10jqka:
+            if "error" in ind:
+                ind = ind_10jqka  # primary K-line failed, use 10jqka entirely
+                logger.info(f"Indicators from 10jqka K-line (MA5={ind.get('ma5')}, MA60={ind.get('ma60')})")
+            else:
+                for key in ["ma60", "rsi", "atr"]:
+                    if ind_10jqka.get(key, 0) and (not ind.get(key)):
+                        ind[key] = ind_10jqka[key]
+                logger.info(f"Indicators enriched from 10jqka K-line (MA60={ind.get('ma60')})")
+
+    # Concept boards
+    concept_boards = []
+    # Try 10jqka first (more complete/relevant concept mapping), fall back to EastMoney
+    try:
+        from astock_data_10jqka import get_concept_boards_10jqka
+        concept_boards = get_concept_boards_10jqka(code)
+        if concept_boards:
+            logger.info(f"Concept boards from 10jqka for {code}: {[c['board_name'] for c in concept_boards[:10]]}")
+    except Exception as e:
+        logger.debug(f"10jqka concept boards unavailable: {e}")
+    if not concept_boards:
+        try:
+            concept_boards = get_concept_boards(code)
+            logger.info(f"Concept boards from EastMoney for {code}: {[c['board_name'] for c in concept_boards[:10]]}")
+        except Exception as e:
+            logger.warning(f"Concept boards skipped: {e}")
+
+    # ---- Financial data from East Money datacenter ----
+    financial_data = {}
+    try:
+        financial_data = get_financial_data_em(code, years=5)
+        logger.info(f"Financial data for {code}: {len(financial_data.get('annual', []))} years")
+    except Exception as e:
+        logger.warning(f"Financial data skipped: {e}")
+
+    # ---- Peer comparison from 10jqka F10 ----
+    peer_comparison = {}
+    try:
+        peer_comparison = get_peer_comparison_em(code)
+        logger.info(f"Peer comparison for {code}: {len(peer_comparison.get('peers', []))} peers")
+    except Exception as e:
+        logger.warning(f"Peer comparison skipped: {e}")
+
+    # Revenue composition (主营构成) from EastMoney
+    revenue_composition = {}
+    try:
+        revenue_composition = get_revenue_composition_em(code)
+        if revenue_composition:
+            by_prod = revenue_composition.get("by_product", [])
+            logger.info(f"Revenue composition for {code}: {len(by_prod)} products, {revenue_composition.get('report_date', '')}")
+    except Exception as e:
+        logger.warning(f"Revenue composition skipped: {e}")
+
+    # Sector lifecycle — prefer concept boards (10jqka or EastMoney) over industry classification
     sector_data = None
     try:
-        from sector_lifecycle import analyze_sector_lifecycle
+        from sector_lifecycle import analyze_sector_lifecycle, analyze_sector_by_name
         sector_data = analyze_sector_lifecycle(code)
+        # Prefer 10jqka concept boards (more accurate); EastMoney has is_precise filter
+        is_10jqka = any(c.get("source") == "10jqka" for c in concept_boards)
+        if is_10jqka:
+            # 10jqka boards are ordered by relevance — try top 5
+            candidates = [c["board_name"] for c in concept_boards[:5]]
+        else:
+            # EastMoney: filter precise, sort by specificity
+            precise = [c for c in concept_boards if c.get("is_precise")]
+            industry_name = sector_data.get("sector_name", "") if sector_data else ""
+            def _concept_score(c):
+                name = c.get("board_name", "")
+                specificity = len(name)
+                overlap = len(set(name) & set(industry_name)) if industry_name else 0
+                rank = c.get("board_rank", 99)
+                return (overlap * 10 + specificity, -rank)
+            precise_sorted = sorted(precise, key=_concept_score, reverse=True)
+            candidates = [c["board_name"] for c in precise_sorted[:5]]
+        # Try candidates, pick first that yields valid sector
+        for cand_name in candidates:
+            new_sd = analyze_sector_by_name(cand_name, code)
+            if new_sd:
+                logger.info(
+                    f"Sector from concept board: '{cand_name}' "
+                    f"(was: '{sector_data.get('sector_name', '')}' from industry)"
+                )
+                sector_data = new_sd
+                break
     except Exception as e:
         logger.warning(f"Sector analysis skipped: {e}")
 
     sector_bonus = sector_data.get("bonus", 0) if sector_data else 0
     sc = score_stock(quote, ind, flow, all_news, sector_bonus)
 
+    # Build filtered concept boards: hot/trending boards + core boards, max 10
+    hot_keywords = set()
+    if sector_data and sector_data.get("sector_name"):
+        hot_keywords.add(sector_data["sector_name"])
+    if hot_reason:
+        for kw in re.split(r'[+、，,]+', hot_reason):
+            kw = kw.strip()
+            if len(kw) >= 2:
+                hot_keywords.add(kw)
+
+    filtered_boards = []
+    # Pass 1: hot boards (matching sector name or hot reason keywords)
+    for cb in concept_boards:
+        bn = cb.get("board_name", "")
+        is_hot = any(
+            kw in bn or bn in kw
+            for kw in hot_keywords
+        ) if hot_keywords else False
+        if is_hot:
+            filtered_boards.append(cb)
+
+    # Pass 2: core boards (first from original list, not already in filtered)
+    seen = {cb["board_name"] for cb in filtered_boards}
+    for cb in concept_boards:
+        if cb["board_name"] not in seen:
+            filtered_boards.append(cb)
+            seen.add(cb["board_name"])
+        if len(filtered_boards) >= 10:
+            break
+
     return {
         "quote": quote, "name": name, "code": code,
         "ind": ind, "flow": flow, "news": all_news,
         "order_news": order_news, "sc": sc,
         "kline": kline, "sector_data": sector_data,
+        "concept_boards": concept_boards,
+        "filtered_concept_boards": filtered_boards,
+        "data_10jqka": data_10jqka,
+        "financial_data": financial_data,
+        "peer_comparison": peer_comparison,
+        "revenue_composition": revenue_composition,
     }
 
 
-def format_report_text(code: str) -> str:
-    """Build a plain-text analysis report (used by queue processor)."""
-    data = build_analysis_data(code)
+def format_report_text(code: str, data: dict = None) -> str:
+    """Build a plain-text analysis report.
+
+    If `data` is provided it must contain quote, ind, flow, news, sc,
+    sector_data, name, concept_boards. Otherwise data is fetched fresh.
+    """
+    if data is None:
+        data = build_analysis_data(code)
     if not data:
         return f"无法获取 {code} 的数据，请稍后重试。"
 
     quote = data["quote"]
     ind = data["ind"]
     flow = data["flow"]
-    news = data["news"]
+    news = data.get("news", [])
     sc = data["sc"]
-    sd = data["sector_data"]
+    sd = data.get("sector_data")
     name = data["name"]
     p = quote.get("price", 0)
     chg = quote.get("change_pct", 0)
@@ -327,12 +580,37 @@ def format_report_text(code: str) -> str:
             lines.append(f"  - {sig}")
         lines.append("")
 
+    # Concept boards — show filtered (hot + core), fall back to all
+    cbs = data.get("filtered_concept_boards") or data.get("concept_boards", [])
+    if cbs:
+        lines.append("=== 概念板块 ===")
+        lines.append("  ".join(f"#{c['board_name']}" for c in cbs[:8]))
+        lines.append("")
+
+    # 10jqka enrichment
+    d10jqka = data.get("data_10jqka", {}) or {}
+    if d10jqka:
+        hot_reason = d10jqka.get("hot_reason")
+        if hot_reason:
+            lines.append(f"热点归因: {hot_reason}")
+            lines.append("")
+        eps = d10jqka.get("eps_forecast", {}) or {}
+        eps_rows = eps.get("rows", [])
+        if eps_rows:
+            lines.append("=== 机构一致预期 ===")
+            for row in eps_rows[:3]:
+                line_parts = []
+                for k, v in row.items():
+                    line_parts.append(f"{k}={v}")
+                lines.append(" | ".join(line_parts))
+            lines.append("")
+
     if ind and "error" not in ind:
         lines.append("=== 技术面 ===")
-        lines.append(f"MA5: {ind['ma5']}  MA20: {ind['ma20']}  MA60: {ind['ma60']}")
-        lines.append(f"MACD: DIF={ind['dif']}  DEA={ind['dea']}  柱={ind['macd_bar']}")
-        lines.append(f"RSI: {ind['rsi']}  ATR: {ind['atr']}  量比: {ind['vol_ratio']}")
-        lines.append(f"压力位: {ind['resistance']}  支撑位: {ind['support']}")
+        lines.append(f"MA5: {ind.get('ma5', 0)}  MA20: {ind.get('ma20', 0)}  MA60: {ind.get('ma60', 0)}")
+        lines.append(f"MACD: DIF={ind.get('dif', 0)}  DEA={ind.get('dea', 0)}  柱={ind.get('macd_bar', 0)}")
+        lines.append(f"RSI: {ind.get('rsi', 0)}  ATR: {ind.get('atr', 0)}  量比: {ind.get('vol_ratio', 0)}")
+        lines.append(f"压力位: {ind.get('resistance', 0)}  支撑位: {ind.get('support', 0)}")
 
     if flow:
         lines.append("")

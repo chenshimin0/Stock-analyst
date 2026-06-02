@@ -13,6 +13,7 @@ import logging
 import re
 import time
 import urllib.request
+import requests
 from typing import Optional
 
 logger = logging.getLogger("astock_data")
@@ -281,4 +282,323 @@ def get_stock_info(code: str) -> dict:
         }
     except Exception as e:
         logger.warning(f"Stock info failed for {code}: {e}")
+        return {}
+
+
+# ===================================================================
+# 7. Concept boards — EastMoney CoreConception API
+# ===================================================================
+
+def get_concept_boards(code: str) -> list:
+    """Get all concept/theme boards for a stock from EastMoney.
+
+    Returns list of {board_name, board_code, is_precise, board_rank}.
+    Example: CPO概念, 光通信, 5G, 华为概念 etc.
+    """
+    market = "SH" if code.startswith("6") else "SZ"
+    url = (
+        f"https://emweb.securities.eastmoney.com/"
+        f"PC_HSF10/CoreConception/PageAjax?code={market}{code}"
+    )
+    headers = {"Referer": "https://emweb.securities.eastmoney.com/"}
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        resp = urllib.request.urlopen(req, timeout=10)
+        raw = resp.read()
+        if raw[:2] == b'\x1f\x8b':
+            import gzip
+            raw = gzip.decompress(raw)
+        data = json.loads(raw)
+        boards = []
+        for item in data.get("ssbk", []):
+            boards.append({
+                "board_name": item.get("BOARD_NAME", ""),
+                "board_code": f"BK{item['BOARD_CODE']}" if item.get("BOARD_CODE") else "",
+                "is_precise": item.get("IS_PRECISE", "0") == "1",
+                "board_rank": item.get("BOARD_RANK", 99),
+            })
+        return boards
+    except Exception as e:
+        logger.warning(f"get_concept_boards failed for {code}: {e}")
+        return []
+
+
+# ===================================================================
+# 7. Financial data — East Money datacenter API (RPT_F10_FINANCE_MAINFINADATA)
+#    Covers: income statement, balance sheet, cash flow, R&D, valuation metrics.
+#    Returns structured financial data for multi-year analysis.
+# ===================================================================
+
+_EM_DATACENTER = "https://datacenter.eastmoney.com/api/data/v1/get"
+_EM_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36",
+    "Referer": "https://data.eastmoney.com/",
+}
+
+
+def _em_get(report_name: str, filter_str: str, page_size: int = 20,
+            sort_columns: str = "REPORT_DATE", sort_types: str = "-1") -> list:
+    """Generic East Money datacenter API fetcher with retry."""
+    params = {
+        "reportName": report_name,
+        "columns": "ALL",
+        "pageNumber": "1",
+        "pageSize": str(page_size),
+        "sortTypes": sort_types,
+        "sortColumns": sort_columns,
+        "filter": filter_str,
+        "source": "WEB",
+        "client": "WEB",
+    }
+    query = "&".join(f"{k}={urllib.parse.quote(str(v))}" for k, v in params.items())
+    url = f"{_EM_DATACENTER}?{query}"
+
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(url, headers=_EM_HEADERS)
+            resp = urllib.request.urlopen(req, timeout=15)
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("success"):
+                return (data.get("result") or {}).get("data") or []
+            return []
+        except Exception as e:
+            if attempt == 2:
+                logger.warning(f"EM datacenter failed: {e}")
+                return []
+            time.sleep(1 + attempt * 0.5)
+    return []
+
+
+def get_financial_data_em(code: str, years: int = 5) -> dict:
+    """Fetch multi-year financial indicators from East Money datacenter.
+
+    Returns:
+      - "annual": list of dicts, each with year, revenue(亿), revenue_yoy(%),
+        net_profit(亿), net_profit_yoy(%), deducted_profit(亿), deducted_profit_yoy(%),
+        gross_margin(%), net_margin(%), roe_weighted(%), debt_ratio(%),
+        current_ratio, eps, bvps, cf_oper(亿), rd_expense(亿), rd_rev_ratio(%),
+        total_assets(亿), total_equity(亿), total_shares(亿), staff_num
+      - "latest_quarter": same keys for most recent quarter (may be Q1/Q2/Q3)
+    Returns {} on failure.
+    """
+    try:
+        rows = _em_get("RPT_F10_FINANCE_MAINFINADATA",
+                        f'(SECURITY_CODE="{code}")',
+                        page_size=years * 5)
+
+        def _to_yi(val) -> float:
+            """Convert raw yuan to yi (divide by 1e8)."""
+            if val is None:
+                return 0.0
+            return round(float(val) / 1e8, 2)
+
+        def _pct(val) -> float:
+            if val is None:
+                return 0.0
+            return round(float(val), 2)
+
+        def _parse_row(r: dict) -> dict:
+            """Parse a single data row into the structured format."""
+            total_shares = float(r.get("TOTAL_SHARE") or 0)
+            return {
+                "year": int((r["REPORT_DATE"] or "")[:4]) if r.get("REPORT_DATE") else 0,
+                "report_date": (r.get("REPORT_DATE") or "")[:10],
+                "revenue": _to_yi(r.get("TOTALOPERATEREVE")),
+                "revenue_yoy": _pct(r.get("TOTALOPERATEREVETZ")),
+                "net_profit": _to_yi(r.get("PARENTNETPROFIT")),
+                "net_profit_yoy": _pct(r.get("PARENTNETPROFITTZ")),
+                "deducted_profit": _to_yi(r.get("KCFJCXSYJLR")),
+                "deducted_profit_yoy": _pct(r.get("KCFJCXSYJLRTZ")),
+                "gross_margin": _pct(r.get("XSMLL")),
+                "net_margin": _pct(r.get("XSJLL")),
+                "roe_weighted": _pct(r.get("ROEJQ")),
+                "debt_ratio": _pct(r.get("ZCFZL")),
+                "current_ratio": _pct(r.get("LD")),
+                "eps": _pct(r.get("EPSJB")),
+                "bvps": _pct(r.get("BPS")),
+                "cf_oper": _to_yi(r.get("MGJYXJJE", 0) * total_shares) if total_shares else 0,
+                "rd_expense": _to_yi(r.get("RDEXPEND")),
+                "rd_rev_ratio": _pct(r.get("PRATIO")),
+                "rd_personnel": r.get("RDPERSONNEL"),
+                "total_assets": _to_yi(r.get("TOTAL_ASSETS_PK")),
+                "total_equity": _to_yi(r.get("TOTAL_EQUITY_PK")),
+                "total_shares": round(total_shares / 1e8, 2) if total_shares else 0,
+                "staff_num": r.get("STAFF_NUM"),
+                "report_type": r.get("REPORT_TYPE", ""),
+            }
+
+        all_rows = [_parse_row(r) for r in rows if r.get("REPORT_DATE")]
+        # Sort by date descending
+        all_rows.sort(key=lambda x: x["report_date"], reverse=True)
+
+        # Separate annual reports from quarterly
+        annual = [r for r in all_rows if r["report_type"] == "年报"]
+        # Cap at requested years
+        annual = annual[:years]
+
+        # Latest quarterly (Q1, half-year, Q3)
+        quarters = [r for r in all_rows if r["report_type"] != "年报"]
+        latest_quarter = quarters[0] if quarters else {}
+
+        result = {"annual": annual}
+        if latest_quarter:
+            result["latest_quarter"] = latest_quarter
+        return result
+    except Exception as e:
+        logger.warning(f"get_financial_data_em failed for {code}: {e}")
+        return {}
+
+
+def get_peer_comparison_em(code: str) -> dict:
+    """Get peer company financial comparison data.
+
+    Uses 10jqka industry comparison page to extract structured peer metrics.
+    Selects the table with highest total revenue (annual data), deduplicates,
+    and returns top peers sorted by revenue.
+
+    Returns {"peers": [...], "industry_name": ""} or {} on failure.
+    """
+    try:
+        from astock_data_10jqka import get_industry_comparison
+        ic = get_industry_comparison(code)
+        tables = ic.get("tables", [])
+        if not tables:
+            return {}
+
+        def _parse_num(val_str: str) -> float:
+            if not val_str:
+                return 0.0
+            s = str(val_str).replace(",", "").replace("%", "").strip()
+            if "亿" in s:
+                return float(s.replace("亿", ""))
+            if "万" in s:
+                return float(s.replace("万", "")) / 10000
+            try:
+                return float(s)
+            except ValueError:
+                return 0.0
+
+        # Pick the table with the highest total revenue (annual data, not quarterly)
+        best_rows = []
+        best_rev = 0
+        for t in tables:
+            cols = t.get("columns", [])
+            rows = t.get("rows", [])
+            if not any(kw in "".join(cols) for kw in ["股票简称", "股票代码"]):
+                continue
+            total_rev = sum(_parse_num(r.get("营业总收入(元)", "0")) for r in rows)
+            if total_rev > best_rev:
+                best_rev = total_rev
+                best_rows = rows
+
+        if not best_rows:
+            return {}
+
+        # Deduplicate and build peer list
+        seen = set()
+        peers = []
+        for row in best_rows:
+            peer_code = str(row.get("股票代码", "")).strip()
+            peer_name = str(row.get("股票简称", "")).strip()
+            if not peer_code or not peer_name or peer_code in seen:
+                continue
+            seen.add(peer_code)
+
+            equity_ratio = _parse_num(row.get("股东权益比率", "0"))
+            rev = _parse_num(row.get("营业总收入(元)", "0"))
+            np_val = _parse_num(row.get("净利润(元)", "0"))
+            gm = _parse_num(row.get("销售毛利率", "0"))
+            roe = _parse_num(row.get("净资产收益率", "0"))
+
+            peers.append({
+                "code": peer_code,
+                "name": peer_name,
+                "revenue": rev,
+                "net_profit": np_val,
+                "gross_margin": gm,
+                "roe": roe,
+                "debt_ratio": round(100 - equity_ratio, 1) if equity_ratio else None,
+                "eps": _parse_num(row.get("每股收益(元)", "0")),
+                "bvps": _parse_num(row.get("每股净资产(元)", "0")),
+                "total_assets": _parse_num(row.get("总资产(元)", "0")),
+                "market_cap": None,
+                "pe": None,
+                "pb": None,
+            })
+
+        # Sort by revenue desc, limit to top 30
+        peers.sort(key=lambda x: x["revenue"], reverse=True)
+        peers = peers[:30]
+
+        return {"peers": peers, "industry_name": ""}
+    except Exception as e:
+        logger.warning(f"get_peer_comparison_em failed for {code}: {e}")
+        return {}
+
+
+def get_revenue_composition_em(code: str) -> dict:
+    """Get revenue composition (主营构成) from EastMoney F10 BusinessAnalysis API.
+
+    Returns {"by_product": [...], "by_region": [...], "report_date": "..."} or {} on failure.
+    Each item: {"name": str, "revenue": float, "ratio_pct": float, "gross_margin_pct": float}
+    """
+    try:
+        url = (
+            "https://emweb.securities.eastmoney.com/PC_HSF10/"
+            "BusinessAnalysis/PageAjax"
+        )
+        params = {"code": f"{'SH' if code.startswith(('6', '9')) else 'SZ'}{code}"}
+        headers = {
+            "User-Agent": "Mozilla/5.0",
+            "Referer": "https://emweb.securities.eastmoney.com/",
+        }
+        r = requests.get(url, params=params, headers=headers, timeout=15)
+        d = r.json()
+        zygcfx = d.get("zygcfx", [])
+        if not zygcfx:
+            return {}
+
+        # Get latest report date's data
+        dates = sorted(set(item["REPORT_DATE"] for item in zygcfx), reverse=True)
+        latest = dates[0] if dates else ""
+
+        def _parse_items(op_type: str) -> list:
+            items = [
+                i for i in zygcfx
+                if i["REPORT_DATE"] == latest and str(i.get("MAINOP_TYPE", "")) == op_type
+            ]
+            # Sort by ratio descending, filter out "其他(补充)" noise if there are enough items
+            items.sort(key=lambda x: x.get("MBI_RATIO", 0), reverse=True)
+            result = []
+            for i in items:
+                name = i.get("ITEM_NAME", "").strip()
+                # Skip "其他" type entries unless they're significant
+                if "补充" in name or "内部抵消" in name or "分部间抵销" in name:
+                    continue
+                ratio = i.get("MBI_RATIO", 0)
+                if isinstance(ratio, (int, float)):
+                    ratio = round(ratio * 100, 2)  # API returns decimal, convert to %
+                result.append({
+                    "name": name,
+                    "revenue": i.get("MAIN_BUSINESS_INCOME", 0),
+                    "ratio_pct": ratio,
+                    "gross_margin_pct": round(i.get("GROSS_RPOFIT_RATIO", 0), 2)
+                    if i.get("GROSS_RPOFIT_RATIO") is not None else None,
+                })
+            return result[:8]  # top 8 items max
+
+        by_product = _parse_items("2")
+        by_region = _parse_items("3")
+
+        if not by_product and not by_region:
+            return {}
+
+        return {
+            "by_product": by_product,
+            "by_region": by_region,
+            "report_date": latest[:10] if latest else "",
+        }
+    except Exception as e:
+        logger.warning(f"get_revenue_composition_em failed for {code}: {e}")
         return {}
