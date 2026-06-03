@@ -47,8 +47,10 @@ def parse_tencent_realtime(code: str, raw: str) -> Optional[dict]:
         price = _float(fields[3])
         if not name or price <= 0:
             return None
+        # Extract actual code from response to guard against index mismatches
+        resp_code = fields[2].strip() if len(fields) > 2 else code
         return {
-            "code": code,
+            "code": resp_code or code,
             "name": name,
             "price": price,
             "change_pct": _float(fields[32]),
@@ -81,6 +83,8 @@ def get_sina_code(stock_code: str) -> str:
 def get_tencent_code(stock_code: str) -> str:
     """Convert stock code to Tencent API format: 600710 -> sh600710, 000001 -> sz000001"""
     code = stock_code.strip()
-    if code.startswith("6"):
+    if code.startswith(("6", "9")):
         return f"sh{code}"
+    if code.startswith("8"):
+        return f"bj{code}"
     return f"sz{code}"

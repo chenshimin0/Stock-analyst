@@ -417,7 +417,7 @@ def get_financial_data_em(code: str, years: int = 5) -> dict:
                 "current_ratio": _pct(r.get("LD")),
                 "eps": _pct(r.get("EPSJB")),
                 "bvps": _pct(r.get("BPS")),
-                "cf_oper": _to_yi(r.get("MGJYXJJE", 0) * total_shares) if total_shares else 0,
+                "cf_oper": _to_yi((r.get("MGJYXJJE") or 0) * total_shares) if total_shares else 0,
                 "rd_expense": _to_yi(r.get("RDEXPEND")),
                 "rd_rev_ratio": _pct(r.get("PRATIO")),
                 "rd_personnel": r.get("RDPERSONNEL"),
@@ -583,7 +583,7 @@ def get_revenue_composition_em(code: str) -> dict:
                     "name": name,
                     "revenue": i.get("MAIN_BUSINESS_INCOME", 0),
                     "ratio_pct": ratio,
-                    "gross_margin_pct": round(i.get("GROSS_RPOFIT_RATIO", 0), 2)
+                    "gross_margin_pct": round(i.get("GROSS_RPOFIT_RATIO", 0) * 100, 2)
                     if i.get("GROSS_RPOFIT_RATIO") is not None else None,
                 })
             return result[:8]  # top 8 items max

@@ -671,13 +671,15 @@ tr:hover{background:#f5f9ff}
       </thead>
       <tbody>
         {% for item in rc.by_product %}
-        {% set rev_yi = (item.revenue / 100000000)|round(2) %}
+        {% if item.revenue is defined and item.ratio_pct is defined %}
+        {% set rev_yi = (item.revenue / 100000000)|round(2) if item.revenue else 0 %}
         <tr {% if loop.first %}style="background:#fff8e8;font-weight:600"{% endif %}>
           <td>{{ item.name }}</td>
           <td class="text-right">{{ rev_yi }}</td>
           <td class="text-right" style="color:#1565c0;font-weight:700">{{ item.ratio_pct }}%</td>
           {% if rc.by_product[0].gross_margin_pct is not none %}<td class="text-right">{{ item.gross_margin_pct }}%</td>{% endif %}
         </tr>
+        {% endif %}
         {% endfor %}
       </tbody>
     </table>
@@ -796,55 +798,11 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
-<!-- 七、订单情况 -->
-{% set orders = ai.order_analysis or {} %}
-{% if orders.total_backlog %}
-<div class="section">
-  <div class="section-title">七、订单情况</div>
-  <div class="order-summary">
-    <div class="order-label">在手订单</div>
-    <div class="order-total">{{ orders.total_backlog }}</div>
-  </div>
-  {% set major_orders = orders.major_orders or [] %}
-  {% if major_orders %}
-  <div class="table-wrap">
-    <table>
-      <thead>
-        <tr><th>客户</th><th>订单详情</th><th class="text-right">金额</th><th class="text-center">状态</th></tr>
-      </thead>
-      <tbody>
-        {% for o in major_orders %}
-        <tr>
-          <td>{{ o.customer }}</td>
-          <td>{{ o.order_detail }}</td>
-          <td class="text-right">{{ o.amount }}</td>
-          <td class="text-center"><span class="biz-trend up">{{ o.status }}</span></td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
-  {% if orders.customer_structure %}
-  <div class="insight-box blue">
-    <span class="label">客户结构</span>
-    {{ orders.customer_structure }}
-  </div>
-  {% endif %}
-  {% if orders.order_visibility %}
-  <div class="insight-box green">
-    <span class="label">订单可见度</span>
-    {{ orders.order_visibility }}
-  </div>
-  {% endif %}
-</div>
-{% endif %}
-
-<!-- 八、对外投资与战略布局 -->
+<!-- 七、对外投资与战略布局 -->
 {% set strategy = ai.strategic_layout or {} %}
 {% if strategy.rd_investment or strategy.strategy_summary %}
 <div class="section">
-  <div class="section-title">八、对外投资与战略布局</div>
+  <div class="section-title">七、对外投资与战略布局</div>
   <div class="strategy-grid">
     {% if strategy.rd_investment %}
     <div class="strategy-item">
@@ -886,10 +844,10 @@ tr:hover{background:#f5f9ff}
 	<div class="card" style="margin-top:12px"><div class="insight-box blue">{{ ord_strat | markdown_html }}</div></div>
 	{% endif %}
 
-<!-- 九、估值展望 -->
+<!-- 八、估值展望 -->
 {% if ai.valuation_analysis %}
 <div class="section">
-  <div class="section-title">九、估值展望</div>
+  <div class="section-title">八、估值展望</div>
   <div class="insight-box blue" style="margin-bottom:12px">{{ ai.valuation_analysis }}</div>
 
   {% set scenarios = ai.valuation_scenarios or [] %}
@@ -917,9 +875,9 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
-<!-- 十、技术面分析 -->
+<!-- 九、技术面分析 -->
 <div class="section">
-  <div class="section-title">十、技术面分析</div>
+  <div class="section-title">九、技术面分析</div>
   {% if ai.technical_analysis %}
   <div class="insight-box blue" style="margin-bottom:12px">{{ ai.technical_analysis }}</div>
   {% endif %}
@@ -944,7 +902,7 @@ tr:hover{background:#f5f9ff}
 {% set experts = ai.expert_opinions or expert_data or {} %}
 {% if experts %}
 <div class="section">
-  <div class="section-title">十一、专家团队研判</div>
+  <div class="section-title">十、专家团队研判</div>
   <div class="card">
     {% for name, exp in experts.items() %}
     <div class="expert-card">
@@ -973,7 +931,7 @@ tr:hover{background:#f5f9ff}
 
 <!-- 八、双轨评分 -->
 <div class="section">
-  <div class="section-title">十二、双轨评分体系</div>
+  <div class="section-title">十一、双轨评分体系</div>
   <div class="score-section">
     {% set sf = scoring_factors or {} %}
     {% set sf_m = sf.momentum or [] %}
@@ -1038,7 +996,7 @@ tr:hover{background:#f5f9ff}
 <!-- 九、事件/舆情 -->
 {% if events_data %}
 <div class="section">
-  <div class="section-title">十三、事件驱动与舆情</div>
+  <div class="section-title">十二、事件驱动与舆情</div>
   <div class="card">
     {% for event in events_data %}
     <div style="padding:10px 0;border-bottom:1px solid #e8eef8;display:flex;gap:10px;align-items:flex-start">
@@ -1053,17 +1011,17 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
-<!-- 十四、操作建议与风险（AI深度分析补充） -->
+<!-- 十三、操作建议与风险（AI深度分析补充） -->
 {% set rec_risk = ai.md_recommendation_and_risk or ai.recommendation_and_risk or "" %}
 {% if rec_risk is string and rec_risk %}
 <div class="card" style="margin-bottom:12px"><div class="insight-box blue">{{ rec_risk | markdown_html }}</div></div>
 {% endif %}
 
-<!-- 十四、操作建议 -->
+<!-- 十三、操作建议 -->
 {% set rec = ai.recommendation or recommendation or {} %}
 {% if rec %}
 <div class="section">
-  <div class="section-title">十四、操作建议</div>
+  <div class="section-title">十三、操作建议</div>
   <div class="card">
     {% if rec.short_term %}
     <div class="rec-card">
@@ -1167,11 +1125,11 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
-<!-- 十五、风险预警 -->
+<!-- 十四、风险预警 -->
 {% set alerts = ai.risk_alerts or [] %}
 {% if alerts %}
 <div class="section">
-  <div class="section-title">十五、风险预警</div>
+  <div class="section-title">十四、风险预警</div>
   {% for a in alerts %}
   <div class="alert {{ a.level or 'yellow' }}">
     <div class="alert-title">{{ a.title }}</div>

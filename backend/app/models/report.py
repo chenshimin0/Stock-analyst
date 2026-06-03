@@ -32,6 +32,7 @@ class Report(Base):
     financial_data_raw = Column(JSON, nullable=True)
     peer_comparison_raw = Column(JSON, nullable=True)
     revenue_composition_raw = Column(JSON, nullable=True)
+    adjusted_price_at_report = Column(Float, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     price_snapshots = relationship("PriceSnapshot", back_populates="report", cascade="all, delete-orphan")

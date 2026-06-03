@@ -15,7 +15,7 @@ try:
     from sqlalchemy import text, inspect
     inspector = inspect(engine)
     cols = [c["name"] for c in inspector.get_columns("reports")]
-    for col_name in ["filtered_concept_boards", "revenue_composition_raw"]:
+    for col_name in ["filtered_concept_boards", "revenue_composition_raw", "adjusted_price_at_report"]:
         if col_name not in cols:
             with engine.connect() as conn:
                 conn.execute(text(f"ALTER TABLE reports ADD COLUMN {col_name} JSON"))

@@ -24,6 +24,11 @@ a { text-decoration: none; color: inherit; }
 .sort-controls { display: flex; gap: 8px; }
 .sort-controls button { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-secondary); font-size: 13px; cursor: pointer; transition: all 0.15s; }
 .sort-controls button:hover, .sort-controls button.active { border-color: var(--accent); background: rgba(59,130,246,0.1); color: var(--accent); }
+.sort-controls .order-toggle { min-width: 72px; }
+
+.refresh-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--orange); background: rgba(249,115,22,0.1); color: var(--orange); font-size: 13px; cursor: pointer; transition: all 0.15s; white-space: nowrap; }
+.refresh-btn:hover:not(:disabled) { background: rgba(249,115,22,0.2); }
+.refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
 .report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
 
@@ -73,10 +78,23 @@ body.light-theme .sidebar { display: none; }
 .winrate-table th { padding: 10px 12px; text-align: left; color: var(--text-secondary); border-bottom: 1px solid var(--border); }
 .winrate-table td { padding: 10px 12px; border-bottom: 1px solid var(--border); font-variant-numeric: tabular-nums; }
 .winrate-table tr:last-child td { border-bottom: none; }
+.winrate-table tbody tr:hover { background: rgba(59,130,246,0.05); }
+.winrate-table tbody tr.selected { background: rgba(59,130,246,0.12); }
 
 .refresh-indicator { font-size: 12px; color: var(--text-secondary); display: flex; align-items: center; gap: 6px; }
 .refresh-indicator .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
 @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+
+/* Pagination */
+.pagination { display: flex; justify-content: center; align-items: center; gap: 16px; margin-top: 24px; padding: 16px 0; }
+.page-btn { padding: 8px 18px; border-radius: 8px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 14px; cursor: pointer; transition: all 0.15s; }
+.page-btn:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.page-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+.page-info { font-size: 13px; color: var(--text-secondary); }
+
+/* Sortable table headers */
+.sortable { cursor: pointer; user-select: none; white-space: nowrap; }
+.sortable:hover { color: var(--accent); }
 
 /* ============================================================
    Responsive: Tablet / Mobile (≤768px)

@@ -137,10 +137,13 @@ class ReportService:
         return db.query(Report).order_by(Report.created_at.desc()).all()
 
     @staticmethod
-    async def get_reports_with_performance(db: Session, sort: str = "performance", order: str = "desc") -> list[dict]:
+    async def get_reports_with_performance(
+        db: Session, sort: str = "performance", order: str = "desc",
+        page: int = 1, page_size: int = 20,
+    ) -> dict:
         reports = db.query(Report).order_by(Report.created_at.desc()).all()
         if not reports:
-            return []
+            return {"items": [], "total": 0, "page": page, "page_size": page_size}
 
         codes = list({r.stock_code for r in reports})
         prices = await PriceService.get_realtime_prices_batch(codes)
@@ -151,8 +154,9 @@ class ReportService:
             current = price_map.get(r.stock_code, {})
             current_price = current.get("price")
             perf_score = None
-            if current_price and r.price_at_report > 0:
-                perf_score = round((current_price - r.price_at_report) / r.price_at_report * 100, 2)
+            base_price = r.adjusted_price_at_report or r.price_at_report
+            if current_price and base_price > 0:
+                perf_score = round((current_price - base_price) / base_price * 100, 2)
 
             results.append({
                 "id": r.id,
@@ -161,6 +165,7 @@ class ReportService:
                 "slug": r.slug,
                 "report_date": r.report_date,
                 "price_at_report": r.price_at_report,
+                "adjusted_price_at_report": r.adjusted_price_at_report,
                 "current_price": current_price,
                 "performance_score": perf_score,
                 "momentum_score": r.momentum_score,
@@ -178,7 +183,50 @@ class ReportService:
             results.sort(key=lambda x: str(x.get("report_date", "")), reverse=reverse)
         else:
             results.sort(key=lambda x: x.get("performance_score") or -9999, reverse=reverse)
-        return results
+
+        total = len(results)
+        start = (page - 1) * page_size
+        end = start + page_size
+        return {
+            "items": results[start:end],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    @staticmethod
+    async def refresh_adjusted_prices(db: Session) -> dict:
+        """Re-query 前复权 close prices for all reports and store them.
+
+        Fetches K-line data once per stock, then looks up each report date.
+        """
+        reports = db.query(Report).all()
+        if not reports:
+            return {"updated": 0}
+
+        # Group by stock code
+        by_code: dict[str, list] = {}
+        for r in reports:
+            by_code.setdefault(r.stock_code, []).append(r)
+
+        updated = 0
+        for code, stock_reports in by_code.items():
+            kline_data = await PriceService._fetch_kline_data(code)
+            if not kline_data:
+                continue
+
+            for r in stock_reports:
+                target = str(r.report_date).replace("-", "")
+                price = PriceService._lookup_kline_close(kline_data, target)
+                if price and price > 0:
+                    r.adjusted_price_at_report = price
+                    updated += 1
+
+        db.commit()
+        return {"updated": updated}
+
+        db.commit()
+        return {"updated": updated}
 
     @staticmethod
     async def get_all_reports_winrates(db: Session) -> list[dict]:

@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 
 from app.database import get_db
-from app.schemas import ReportCreate, ReportSummary, ReportDetail, ReportUpdate, WinRateResponse, WinRatePeriod, AggregateWinRate
+from app.schemas import ReportCreate, ReportSummary, ReportDetail, ReportUpdate, WinRateResponse, WinRatePeriod, AggregateWinRate, PaginatedReports
 from app.services.report_service import ReportService
 from app.services.winrate_service import WinRateService
 from app.models import Report
@@ -104,13 +104,17 @@ _tpl_env = Environment(
 _tpl_env.filters["markdown_html"] = _markdown_to_html
 
 
-@router.get("", response_model=list[ReportSummary])
+@router.get("", response_model=PaginatedReports)
 async def list_reports(
     sort: str = Query("performance", alias="sort"),
     order: str = Query("desc", alias="order"),
+    page: int = Query(1, alias="page", ge=1),
+    page_size: int = Query(20, alias="page_size", ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    return await ReportService.get_reports_with_performance(db, sort=sort, order=order)
+    return await ReportService.get_reports_with_performance(
+        db, sort=sort, order=order, page=page, page_size=page_size,
+    )
 
 
 @router.get("/{report_id}")
@@ -179,6 +183,12 @@ async def get_report_winrate(report_id: int, db: Session = Depends(get_db)):
 @router.get("/winrate/all")
 async def get_all_reports_winrates(db: Session = Depends(get_db)):
     return await ReportService.get_all_reports_winrates(db)
+
+
+@router.post("/refresh-prices")
+async def refresh_adjusted_prices(db: Session = Depends(get_db)):
+    result = await ReportService.refresh_adjusted_prices(db)
+    return result
 
 
 @router.get("/winrate/aggregate", response_model=list[AggregateWinRate])

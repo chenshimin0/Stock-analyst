@@ -27,6 +27,7 @@ class ReportCreate(BaseModel):
     financial_data_raw: Optional[dict] = None
     peer_comparison_raw: Optional[dict] = None
     revenue_composition_raw: Optional[dict] = None
+    adjusted_price_at_report: Optional[float] = None
 
 
 class ReportUpdate(BaseModel):
@@ -54,6 +55,7 @@ class ReportSummary(BaseModel):
     slug: Optional[str] = None
     report_date: date
     price_at_report: float
+    adjusted_price_at_report: Optional[float] = None
     current_price: Optional[float] = None
     performance_score: Optional[float] = None
     momentum_score: float
@@ -72,6 +74,7 @@ class ReportDetail(BaseModel):
     stock_name: str
     report_date: date
     price_at_report: float
+    adjusted_price_at_report: Optional[float] = None
     momentum_score: float
     revenue_score: float
     risk_score: float
@@ -94,6 +97,13 @@ class ReportDetail(BaseModel):
     created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
+
+
+class PaginatedReports(BaseModel):
+    items: list[ReportSummary]
+    total: int
+    page: int
+    page_size: int
 
 
 class StockPrice(BaseModel):

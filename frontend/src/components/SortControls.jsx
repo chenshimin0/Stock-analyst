@@ -1,9 +1,10 @@
 const SORT_OPTIONS = [
+  { key: 'performance', label: '表现' },
   { key: 'total_score', label: '分析总分' },
   { key: 'date', label: '日期' },
 ];
 
-export default function SortControls({ sortKey, onSort }) {
+export default function SortControls({ sortKey, order, onSort, onOrderToggle }) {
   return (
     <div className="sort-controls">
       {SORT_OPTIONS.map(opt => (
@@ -11,6 +12,9 @@ export default function SortControls({ sortKey, onSort }) {
           {opt.label}
         </button>
       ))}
+      <button className="order-toggle" onClick={onOrderToggle} title={order === 'desc' ? '降序' : '升序'}>
+        {order === 'desc' ? '↓ 降序' : '↑ 升序'}
+      </button>
     </div>
   );
 }
