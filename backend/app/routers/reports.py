@@ -110,10 +110,11 @@ async def list_reports(
     order: str = Query("desc", alias="order"),
     page: int = Query(1, alias="page", ge=1),
     page_size: int = Query(20, alias="page_size", ge=1, le=100),
+    search: str = Query("", alias="search"),
     db: Session = Depends(get_db),
 ):
     return await ReportService.get_reports_with_performance(
-        db, sort=sort, order=order, page=page, page_size=page_size,
+        db, sort=sort, order=order, page=page, page_size=page_size, search=search,
     )
 
 

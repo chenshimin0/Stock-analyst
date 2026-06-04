@@ -950,6 +950,25 @@ def _detect_phase(comp: dict) -> dict:
 # Direct sector analysis (by name, bypassing stock→sector detection)
 # ============================================================
 
+# Boards that are market mechanics, not real industry/concept sectors — never use as lifecycle sector
+_TECHNICAL_BOARD_PATTERNS = [
+    "昨日",      # 昨日涨停, 昨日连板, 昨日首板, 昨日触板, 昨日炸板, 昨日高振幅, 昨日高换手
+    "融资融券",
+    "标准普尔",
+    "富时罗素",
+    "沪股通",
+    "深股通",
+]
+
+
+def _is_technical_board(name: str) -> bool:
+    """Check if a board name is a market-mechanic board, not a real sector."""
+    for pattern in _TECHNICAL_BOARD_PATTERNS:
+        if pattern in name:
+            return True
+    return False
+
+
 def analyze_sector_by_name(sector_name: str, code: str = "") -> Optional[dict]:
     """Analyze a named sector directly — used when sector is known (e.g. from AI tags).
 
@@ -960,12 +979,17 @@ def analyze_sector_by_name(sector_name: str, code: str = "") -> Optional[dict]:
     Returns None if analysis can't be performed (non-blocking).
     Returns dict with: phase, phase_cn, bonus, signals, sector_name, trend_strength
     """
+    # 0. Reject technical/market-mechanic boards
+    if _is_technical_board(sector_name):
+        logger.info(f"Skipping technical board: '{sector_name}'")
+        return None
+
     try:
-        # 0. Seed dynamic cache from this stock (grows organically over time)
+        # 1. Seed dynamic cache from this stock (grows organically over time)
         if code:
             _update_board_cache_from_stock(code)
 
-        # 1. Find board code (with hint code for CoreConception fallback)
+        # 2. Find board code (with hint code for CoreConception fallback)
         bk_code, matched_name = _find_board_code(sector_name, code)
         if not bk_code:
             logger.info(f"No board code match for sector '{sector_name}'")

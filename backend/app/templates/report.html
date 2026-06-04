@@ -395,10 +395,21 @@ tr:hover{background:#f5f9ff}
       {% endif %}
     </div>
 
-    {% if cp.business_segments %}
+    {% set rc = revenue_composition_raw or {} %}
+    {% if rc.by_product or cp.business_segments %}
     <div style="margin-top:16px;padding-top:12px;border-top:1px solid #e8eef8">
       <div class="stat-label" style="margin-bottom:8px">主营业务结构</div>
       <div class="card-grid-2">
+        {% if rc.by_product %}
+        {% for item in rc.by_product %}
+        {% set rev_yi = (item.revenue / 100000000) | round(2) if item.revenue else 0 %}
+        <div style="background:{% if loop.index % 2 == 1 %}#edfbf1{% else %}#eaf2ff{% endif %};border-radius:8px;padding:10px">
+          <div class="stat-label">{{ item.name }}</div>
+          <div class="stat-value {% if loop.index % 2 == 1 %}up{% else %}blue{% endif %}">{{ item.ratio_pct }}%</div>
+          <div class="stat-sub">营收 {{ rev_yi }}亿{% if item.gross_margin_pct is not none %} / 毛利率 {{ item.gross_margin_pct }}%{% endif %}</div>
+        </div>
+        {% endfor %}
+        {% else %}
         {% for seg in cp.business_segments %}
         <div style="background:{% if loop.index % 2 == 1 %}#edfbf1{% else %}#eaf2ff{% endif %};border-radius:8px;padding:10px">
           <div class="stat-label">{{ seg.name }}</div>
@@ -406,6 +417,7 @@ tr:hover{background:#f5f9ff}
           <div class="stat-sub">{{ seg.description }}</div>
         </div>
         {% endfor %}
+        {% endif %}
       </div>
     </div>
     {% endif %}

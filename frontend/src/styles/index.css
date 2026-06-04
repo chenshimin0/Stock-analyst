@@ -30,6 +30,13 @@ a { text-decoration: none; color: inherit; }
 .refresh-btn:hover:not(:disabled) { background: rgba(249,115,22,0.2); }
 .refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
 
+.search-input { padding: 6px 12px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text); font-size: 13px; width: 200px; outline: none; transition: border-color 0.15s; }
+.search-input:focus { border-color: var(--accent); }
+.search-input::placeholder { color: var(--text-secondary); }
+.search-btn { padding: 6px 14px; border-radius: 6px; border: 1px solid var(--accent); background: rgba(59,130,246,0.1); color: var(--accent); font-size: 13px; cursor: pointer; transition: all 0.15s; }
+.search-btn:hover { background: rgba(59,130,246,0.2); }
+.search-clear { padding: 6px 10px; border-radius: 6px; border: 1px solid var(--border); background: var(--card-bg); color: var(--text-secondary); font-size: 12px; cursor: pointer; }
+
 .report-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(360px, 1fr)); gap: 16px; }
 
 .report-card { background: var(--card-bg); border: 1px solid var(--border); border-radius: 12px; padding: 24px; transition: border-color 0.2s, transform 0.15s; cursor: pointer; display: flex; flex-direction: column; gap: 16px; }

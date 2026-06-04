@@ -79,20 +79,36 @@ class ReportService:
             existing.risk_score = data.risk_score
             existing.total_score = data.total_score
             existing.label = data.label
-            existing.financial_data = data.financial_data
-            existing.technical_data = data.technical_data
-            existing.events_data = data.events_data
-            existing.expert_data = data.expert_data
-            existing.recommendation = data.recommendation
-            existing.scoring_factors = data.scoring_factors
-            existing.ai_analysis = data.ai_analysis
-            existing.concept_boards = data.concept_boards
-            existing.filtered_concept_boards = data.filtered_concept_boards
-            existing.sector_data = data.sector_data
-            existing.data_10jqka = data.data_10jqka
-            existing.financial_data_raw = data.financial_data_raw
-            existing.peer_comparison_raw = data.peer_comparison_raw
-            existing.revenue_composition_raw = data.revenue_composition_raw
+            # Only update optional JSON fields if new value is not None,
+            # so pending placeholders don't clear previously saved data
+            if data.financial_data is not None:
+                existing.financial_data = data.financial_data
+            if data.technical_data is not None:
+                existing.technical_data = data.technical_data
+            if data.events_data is not None:
+                existing.events_data = data.events_data
+            if data.expert_data is not None:
+                existing.expert_data = data.expert_data
+            if data.recommendation is not None:
+                existing.recommendation = data.recommendation
+            if data.scoring_factors is not None:
+                existing.scoring_factors = data.scoring_factors
+            if data.ai_analysis is not None:
+                existing.ai_analysis = data.ai_analysis
+            if data.concept_boards is not None:
+                existing.concept_boards = data.concept_boards
+            if data.filtered_concept_boards is not None:
+                existing.filtered_concept_boards = data.filtered_concept_boards
+            if data.sector_data is not None:
+                existing.sector_data = data.sector_data
+            if data.data_10jqka is not None:
+                existing.data_10jqka = data.data_10jqka
+            if data.financial_data_raw is not None:
+                existing.financial_data_raw = data.financial_data_raw
+            if data.peer_comparison_raw is not None:
+                existing.peer_comparison_raw = data.peer_comparison_raw
+            if data.revenue_composition_raw is not None:
+                existing.revenue_composition_raw = data.revenue_composition_raw
             db.commit()
             db.refresh(existing)
             return existing
@@ -139,9 +155,16 @@ class ReportService:
     @staticmethod
     async def get_reports_with_performance(
         db: Session, sort: str = "performance", order: str = "desc",
-        page: int = 1, page_size: int = 20,
+        page: int = 1, page_size: int = 20, search: str = "",
     ) -> dict:
-        reports = db.query(Report).order_by(Report.created_at.desc()).all()
+        query = db.query(Report).order_by(Report.created_at.desc())
+        if search:
+            like = f"%{search}%"
+            from sqlalchemy import or_
+            query = query.filter(
+                or_(Report.stock_code.like(like), Report.stock_name.like(like))
+            )
+        reports = query.all()
         if not reports:
             return {"items": [], "total": 0, "page": page, "page_size": page_size}
 

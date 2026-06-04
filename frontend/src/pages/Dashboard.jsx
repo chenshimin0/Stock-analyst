@@ -5,9 +5,11 @@ import SortControls from '../components/SortControls';
 import ReportCard from '../components/ReportCard';
 
 export default function Dashboard() {
-  const [sortKey, setSortKey] = useState('performance');
+  const [sortKey, setSortKey] = useState('date');
   const [order, setOrder] = useState('desc');
   const [page, setPage] = useState(1);
+  const [search, setSearch] = useState('');
+  const [searchInput, setSearchInput] = useState('');
   const [refreshing, setRefreshing] = useState(false);
   const pageSize = 20;
   const { reports, total, totalPages, loading, error, refetch } = useReports({
@@ -16,6 +18,7 @@ export default function Dashboard() {
     order,
     page,
     pageSize,
+    search,
   });
 
   const handleRefreshPrices = async () => {
@@ -31,6 +34,12 @@ export default function Dashboard() {
     }
   };
 
+  const handleSearch = (e) => {
+    e.preventDefault();
+    setSearch(searchInput.trim());
+    setPage(1);
+  };
+
   if (loading) return <div className="loading">加载中...</div>;
   if (error) return <div className="loading" style={{color:'var(--red)'}}>加载失败: {error}</div>;
 
@@ -38,7 +47,20 @@ export default function Dashboard() {
     <>
       <div className="page-header">
         <h1>我的分析报告</h1>
-        <div style={{display:'flex',alignItems:'center',gap:16}}>
+        <div style={{display:'flex',alignItems:'center',gap:16,flexWrap:'wrap'}}>
+          <form onSubmit={handleSearch} style={{display:'flex',gap:6}}>
+            <input
+              type="text"
+              className="search-input"
+              placeholder="搜索股票名称或代码..."
+              value={searchInput}
+              onChange={e => setSearchInput(e.target.value)}
+            />
+            <button type="submit" className="search-btn">搜索</button>
+            {search && (
+              <button type="button" className="search-clear" onClick={() => { setSearchInput(''); setSearch(''); setPage(1); }}>清除</button>
+            )}
+          </form>
           <button
             className="refresh-btn"
             onClick={handleRefreshPrices}

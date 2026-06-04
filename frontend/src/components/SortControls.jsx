@@ -1,7 +1,7 @@
 const SORT_OPTIONS = [
+  { key: 'date', label: '日期' },
   { key: 'performance', label: '表现' },
   { key: 'total_score', label: '分析总分' },
-  { key: 'date', label: '日期' },
 ];
 
 export default function SortControls({ sortKey, order, onSort, onOrderToggle }) {

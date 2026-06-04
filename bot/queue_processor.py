@@ -91,6 +91,17 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                        peer_comparison_raw: dict = None,
                        revenue_composition: dict = None):
     """Save the complete analysis report to the web backend."""
+    # Ensure revenue composition is always populated — retry if empty
+    if not revenue_composition or not revenue_composition.get("by_product"):
+        try:
+            from astock_data import get_revenue_composition_em
+            rc = get_revenue_composition_em(code)
+            if rc and rc.get("by_product"):
+                revenue_composition = rc
+                logger.info("Revenue composition re-fetched for %s: %d products",
+                           code, len(rc["by_product"]))
+        except Exception as e:
+            logger.warning("Revenue composition re-fetch failed for %s: %s", code, e)
     try:
         p = quote.get("price", 0)
         atr = ind.get("atr", 0)
