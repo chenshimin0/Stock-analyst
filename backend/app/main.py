@@ -5,17 +5,19 @@ from pathlib import Path
 
 from app.config import CORS_ORIGINS
 from app.database import engine, Base
-from app.models import Report, PriceSnapshot, WinRate
+from app.models import Report, PriceSnapshot, WinRate, SectorPick, SectorPickStock, SectorMemberCache
+from app.models.sector_pick import Base as SectorPickBase
 from app.routers import reports, stocks, sector
 
 Base.metadata.create_all(bind=engine)
+SectorPickBase.metadata.create_all(bind=engine)
 
 # Migration: add missing columns if not exists (SQLite)
 try:
     from sqlalchemy import text, inspect
     inspector = inspect(engine)
     cols = [c["name"] for c in inspector.get_columns("reports")]
-    for col_name in ["filtered_concept_boards", "revenue_composition_raw", "adjusted_price_at_report"]:
+    for col_name in ["filtered_concept_boards", "revenue_composition_raw", "adjusted_price_at_report", "fund_flow_recent", "last_limit_up_date", "last_limit_up_days_ago"]:
         if col_name not in cols:
             with engine.connect() as conn:
                 conn.execute(text(f"ALTER TABLE reports ADD COLUMN {col_name} JSON"))
