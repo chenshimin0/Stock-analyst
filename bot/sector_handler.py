@@ -174,6 +174,13 @@ async def _run_new_pick_in_chat(bot, chat_id: int, concept_name: str):
             lines.append(f"- {p['code']} {p['name']} — {p['reason']}")
         lines.append("")
         lines.append(f"数据源：{'API 实时' if result['source'] == 'api_driven' else 'AI 知识'}")
+        if result.get("rejected"):
+            lines.append("")
+            lines.append("⚠️ 以下股票被后置校验拒绝（不合规，未选入）：")
+            for r in result["rejected"][:3]:
+                rs = "; ".join(r.get("reject_reasons", []))
+                lines.append(f"  · {r['code']} {r['name']} — {rs}")
+        lines.append("")
         lines.append("将在 T+5/10/20 个交易日后自动追踪。")
         await bot.send_message(chat_id=chat_id, text="\n".join(lines))
     finally:
