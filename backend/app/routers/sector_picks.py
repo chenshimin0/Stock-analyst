@@ -119,6 +119,17 @@ def archive_sector_pick(pick_id: int, db: Session = Depends(get_db)):
     return {"id": p.id, "status": p.status}
 
 
+@router.delete("/{pick_id}")
+def delete_sector_pick(pick_id: int, db: Session = Depends(get_db)):
+    """Hard-delete a sector pick and its stocks. Cascades to sector_pick_stocks."""
+    p = db.query(SectorPick).filter(SectorPick.id == pick_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Sector pick not found")
+    db.delete(p)  # cascade=delete-orphan on stocks relationship
+    db.commit()
+    return {"detail": "deleted", "id": pick_id}
+
+
 def _avg(stocks, attr: str) -> Optional[float]:
     vals = [getattr(s, attr) for s in stocks if getattr(s, attr) is not None]
     if not vals:

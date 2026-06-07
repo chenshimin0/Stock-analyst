@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { getSectorPick, archiveSectorPick } from '../api/sector.js';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { getSectorPick, archiveSectorPick, deleteSectorPick } from '../api/sector.js';
 
 export default function SectorDetail() {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [pick, setPick] = useState(null);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
@@ -22,6 +23,17 @@ export default function SectorDetail() {
     if (!confirm(`确认归档板块 ${pick.sector_name}？`)) return;
     await archiveSectorPick(id);
     load();
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`确认永久删除板块 ${pick.sector_name} 及其 3 只股票记录？\n此操作不可恢复。`)) return;
+    try {
+      await deleteSectorPick(id);
+      alert(`已删除板块 ${pick.sector_name}`);
+      navigate('/sector-tracker');
+    } catch (e) {
+      alert(`删除失败: ${e.message || e}`);
+    }
   };
 
   if (loading) return <div style={{ padding: 24 }}>加载中…</div>;
@@ -76,20 +88,36 @@ export default function SectorDetail() {
         </tbody>
       </table>
 
-      {pick.status !== 'archived' && (
+      <div style={{ display: 'flex', gap: 12 }}>
+        {pick.status !== 'archived' && (
+          <button
+            onClick={handleArchive}
+            style={{
+              padding: '8px 16px',
+              background: '#fff',
+              border: '1px solid #ccc',
+              borderRadius: 4,
+              cursor: 'pointer',
+            }}
+          >
+            归档
+          </button>
+        )}
         <button
-          onClick={handleArchive}
+          onClick={handleDelete}
           style={{
             padding: '8px 16px',
             background: '#fff',
-            border: '1px solid #ccc',
+            border: '1px solid #d32f2f',
+            color: '#d32f2f',
             borderRadius: 4,
             cursor: 'pointer',
+            fontWeight: 600,
           }}
         >
-          归档
+          🗑️ 永久删除
         </button>
-      )}
+      </div>
     </div>
   );
 }

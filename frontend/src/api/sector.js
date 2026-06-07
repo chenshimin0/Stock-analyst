@@ -16,6 +16,11 @@ export async function archiveSectorPick(id) {
   return res.data;
 }
 
+export async function deleteSectorPick(id) {
+  const res = await client.delete(`/sector-picks/${id}`);
+  return res.data;
+}
+
 export async function createSectorPick(payload) {
   const res = await client.post('/sector-picks', payload);
   return res.data;

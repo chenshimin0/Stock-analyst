@@ -150,13 +150,19 @@ def create_report(data: ReportCreate, db: Session = Depends(get_db)):
 
 
 @router.delete("/{report_id}")
-def delete_report(report_id: int, db: Session = Depends(get_db)):
-    report = db.query(Report).filter(Report.id == report_id).first()
+def delete_report(report_id: str, db: Session = Depends(get_db)):
+    """Delete by numeric id or slug (e.g. 'HHKJ' or '600378')."""
+    q = db.query(Report)
+    if report_id.isdigit():
+        report = q.filter(Report.id == int(report_id)).first()
+    else:
+        report = q.filter(Report.slug == report_id).order_by(Report.created_at.desc()).first()
     if not report:
         return {"detail": "Report not found"}, 404
+    rid = report.id
     db.delete(report)
     db.commit()
-    return {"detail": "deleted", "id": report_id}
+    return {"detail": "deleted", "id": rid}
 
 
 @router.put("/{report_id}", response_model=ReportDetail)
