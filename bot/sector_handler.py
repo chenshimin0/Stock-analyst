@@ -128,10 +128,19 @@ async def _run_new_pick_in_chat(bot, chat_id: int, concept_name: str):
             concept_name, db, deepseek_callable=call_deepseek,
         )
         if "error" in result:
-            await bot.send_message(
-                chat_id=chat_id,
-                text=f"选股失败：{result['error']}\n请换一个概念重试。",
-            )
+            err_lines = [
+                f"❌ 选股失败：{result['error']}",
+                "",
+                f"可能原因：",
+                f"  • 概念过冷门，DeepSeek 知识截止 2024 年初",
+                f"  • 候选股大多市值 > 1000 亿（行业龙头但盘子太大）",
+                f"  • 同花顺热点 7 天内没匹配该概念",
+                "",
+                f"建议：",
+                f"  • 换更主流的概念（如 算力/CPO/固态电池/机器人）",
+                f"  • 或直接给我具体股票代码",
+            ]
+            await bot.send_message(chat_id=chat_id, text="\n".join(err_lines))
             return
         # Archive any old active pick (defensive)
         old = (
