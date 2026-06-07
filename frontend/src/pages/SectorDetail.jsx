@@ -67,7 +67,7 @@ export default function SectorDetail() {
               <td style={td}><Pct value={s.t20_pct} /></td>
             </tr>
           ))}
-          <tr style={{ background: '#fafafa', fontWeight: 600 }}>
+          <tr style={{ background: '#fff3cd', color: '#5d4037', fontWeight: 600 }}>
             <td style={td} colSpan={4}>板块平均</td>
             <td style={td}><Pct value={avgT5} /></td>
             <td style={td}><Pct value={avgT10} /></td>
