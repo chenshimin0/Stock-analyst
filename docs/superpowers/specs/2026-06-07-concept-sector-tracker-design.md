@@ -370,7 +370,33 @@ nohup python3 bot/sector_scheduler.py > logs/sector_scheduler.log 2>&1 &
 55 19 * * * /path/to/check_scheduler.sh
 ```
 
-### 9. 风险点
+### 9. 与现有代码的集成
+
+#### 9.1 Telegram Bot 集成
+
+修改 `bot/telegram_bot.py`：
+- 在 `register_handlers()` 中新增：
+  - `CallbackQueryHandler(handle_sector_pick_button, pattern='^sector_pick$')`
+  - `MessageHandler(filters.TEXT & ~filters.COMMAND, handle_sector_concept_input)` — 处理后续用户输入
+- Inline 按钮：菜单底部新增 `[📊 板块追踪]`
+- 状态：bot 当前是 polling 单实例，无需多实例协调
+
+#### 9.2 数据库迁移
+
+修改 `backend/app/main.py`，在启动时执行 `ALTER TABLE` 迁移：
+```sql
+CREATE TABLE IF NOT EXISTS sector_picks (...);
+CREATE TABLE IF NOT EXISTS sector_pick_stocks (...);
+CREATE TABLE IF NOT EXISTS sector_member_cache (...);
+```
+
+#### 9.3 与 queue_processor 共用基础设施
+
+- 共用 `tencent_quote()`、`tencent_kline()`（在 `bot/astock_data.py`）
+- 共用 DeepSeek client（`bot/ai_analyzer.py`）
+- 共用 SQLAlchemy session（`backend/app/database.py`）
+
+### 10. 风险点
 
 | 风险 | 缓解 |
 |------|------|
