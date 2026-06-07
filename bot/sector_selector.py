@@ -9,12 +9,16 @@ import logging
 import statistics
 import urllib.request
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date as _date
 from typing import Optional
 
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 from astock_data import get_quote
+try:
+    from astock_data_10jqka import get_hot_reasons as _ths_hot_reason
+except ImportError:
+    _ths_hot_reason = None
 
 logger = logging.getLogger(__name__)
 
@@ -96,14 +100,47 @@ def save_cached_members(sector_name: str, members: list[dict], db_session) -> No
 # =================================================================
 def fetch_concept_members_realtime(sector_name: str) -> list[dict]:
     """
-    Pull concept member stocks from a-stock-data skill.
-    Primary: baidu stock concept mapping.
-    Fallback: ths hot reason reverse-lookup.
-    Returns [] on failure (caller should fallback to AI knowledge).
+    Real-time concept member fetch.
+    Strategy: scan ths hot reason over the last N trading days, find rows
+    where the "reason" tag list contains the concept name (case-insensitive
+    substring). Dedupe by stock_code.
+    Returns [] on any failure (caller falls back to AI knowledge).
     """
-    # TODO: wire up to existing astock_data functions if available.
-    # For now, return [] to exercise the fallback path.
-    return []
+    if not _ths_hot_reason:
+        logger.debug("astock_data_10jqka.get_hot_reasons unavailable; skipping realtime fetch")
+        return []
+
+    target = sector_name.strip().lower()
+    if not target:
+        return []
+
+    members: dict[str, dict] = {}
+    # Last 7 calendar days (~5 trading days) — gives us enough signal even
+    # if the current session had a quiet theme.
+    lookback_days = 7
+    for i in range(lookback_days):
+        d = (_date.today() - timedelta(days=i)).strftime("%Y-%m-%d")
+        try:
+            rows = _ths_hot_reason(d)
+        except Exception as e:
+            logger.warning(f"get_hot_reasons({d}) failed: {e}")
+            continue
+        if not rows:
+            continue
+        for row in rows:
+            reason = str(row.get("reason", "")).lower()
+            if not reason or target not in reason:
+                continue
+            code = str(row.get("code", "")).strip()
+            name = str(row.get("name", "")).strip()
+            if not code or not name:
+                continue
+            if not re.match(r"^\d{6}$", code):
+                continue
+            if code in members:
+                continue
+            members[code] = {"stock_code": code, "stock_name": name}
+    return list(members.values())
 
 
 # =================================================================
