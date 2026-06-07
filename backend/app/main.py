@@ -7,7 +7,7 @@ from app.config import CORS_ORIGINS
 from app.database import engine, Base
 from app.models import Report, PriceSnapshot, WinRate, SectorPick, SectorPickStock, SectorMemberCache
 from app.models.sector_pick import Base as SectorPickBase
-from app.routers import reports, stocks, sector
+from app.routers import reports, stocks, sector, sector_picks
 
 Base.metadata.create_all(bind=engine)
 SectorPickBase.metadata.create_all(bind=engine)
@@ -38,6 +38,7 @@ app.add_middleware(
 app.include_router(reports.router, prefix="/api")
 app.include_router(stocks.router, prefix="/api")
 app.include_router(sector.router, prefix="/api")
+app.include_router(sector_picks.router, prefix="/api")
 
 # Serve frontend in production
 frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
