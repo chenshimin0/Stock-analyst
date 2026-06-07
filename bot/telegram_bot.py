@@ -255,18 +255,28 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "=== A股智能分析助手 ===\n\n"
-        "直接发送股票代码或名称即可分析：\n"
-        "  603337              → 分析单只股票\n"
-        "  茅台 / 宁德时代      → 股票名称也支持\n\n"
-        "多只股票对比：\n"
-        "  对比 600519 000858   → 对比分析\n"
-        "  600519 000858        → 两个以上代码自动对比\n"
-        "  推荐 前3             → 精选排名前N只\n\n"
-        "截图识别：\n"
-        "  发送股票列表截图      → OCR自动识别并分析\n\n"
-        "命令：\n"
-        "  /delete <代码>        → 删除指定股票的报告\n"
-        "  /help                → 显示本帮助"
+        "📈 **个股分析**\n"
+        "  直接发送 6 位代码 / 股票名称     → 自动入队分析\n"
+        "  例：603337、茅台、宁德时代\n\n"
+        "🔀 **多股对比**\n"
+        "  对比 600519 000858   → 深度对比\n"
+        "  600519 000858        → 两个以上自动对比\n"
+        "  推荐 前3             → 精选前 N 只\n\n"
+        "📊 **板块追踪（v3 新功能）**\n"
+        "  /sector pvdf         → 从 pvdf 概念选 3 只 + 5/10/20 日追踪\n"
+        "  /sector 固态电池     → 概念名也支持中文\n"
+        "  60s 内可重开新轮；T+5/10/20 自动更新\n\n"
+        "🖼️ **截图识别**\n"
+        "  发送股票列表截图      → OCR 自动识别并分析\n\n"
+        "🗑️ **删除报告**\n"
+        "  /delete 600519        → 删除指定股票报告\n\n"
+        "📋 **所有命令**\n"
+        "  /start                → 启动 / 欢迎\n"
+        "  /analyze <代码>       → 分析个股\n"
+        "  /compare <代码1> <代码2>  → 多股对比\n"
+        "  /sector <概念>        → 板块追踪\n"
+        "  /delete <代码>        → 删除报告\n"
+        "  /help                 → 显示本帮助"
     )
 
 
@@ -309,6 +319,49 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     except Exception as e:
         logger.error(f"Delete failed for {code}: {e}")
         await update.message.reply_text(f"删除 {code} 失败: {e}")
+
+
+async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Analyze a single stock. Usage: /analyze 600519"""
+    if not context.args:
+        await update.message.reply_text("用法: /analyze <股票代码>\n例如: /analyze 600519")
+        return
+    text = " ".join(context.args)
+    # Reuse handle_message logic by faking a text message update
+    update.message.text = text
+    await handle_message(update, context)
+
+
+async def cmd_compare(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Compare multiple stocks. Usage: /compare 600519 000858"""
+    if len(context.args) < 2:
+        await update.message.reply_text("用法: /compare <代码1> <代码2> [代码3 ...]\n例如: /compare 600519 000858")
+        return
+    text = "对比 " + " ".join(context.args)
+    update.message.text = text
+    await handle_message(update, context)
+
+
+async def cmd_sector(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Sector tracking entry. Usage: /sector pvdf or just /sector to start."""
+    from sector_handler import handle_sector_button
+    if not context.args:
+        # Same flow as the inline button
+        class _FakeQuery:
+            def __init__(self, msg):
+                self.message = msg
+            async def answer(self):
+                pass
+        fake = _FakeQuery(update.message)
+        fake_update = type("U", (), {"callback_query": fake, "effective_chat": update.effective_chat})()
+        await handle_sector_button(fake_update, context)
+        return
+    concept = " ".join(context.args).strip()
+    # Set flag and call sector text handler directly
+    context.user_data["awaiting_sector_input"] = True
+    update.message.text = concept
+    from sector_handler import handle_sector_text
+    await handle_sector_text(update, context)
 
 
 # ============================================================
@@ -524,6 +577,17 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).request(request).build()
 
+    # Register bot menu commands (left-bottom "Menu" button)
+    from telegram import BotCommand
+    app.bot.set_my_commands([
+        BotCommand("start",     "🏠 启动 / 查看欢迎"),
+        BotCommand("analyze",   "📈 分析个股（用法 /analyze 600519）"),
+        BotCommand("compare",   "🔀 多股对比（用法 /compare 600519 000858）"),
+        BotCommand("sector",    "📊 板块追踪（按概念选 3 只 + 5/10/20 日追踪）"),
+        BotCommand("delete",    "🗑️ 删除指定股票报告（用法 /delete 600519）"),
+        BotCommand("help",      "❓ 完整使用帮助"),
+    ])
+
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Global error: {context.error}", exc_info=context.error)
         if update and hasattr(update, "message") and update.message:
@@ -536,6 +600,9 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("delete", cmd_delete))
+    app.add_handler(CommandHandler("analyze", cmd_analyze))
+    app.add_handler(CommandHandler("compare", cmd_compare))
+    app.add_handler(CommandHandler("sector", cmd_sector))
     # Register sector-tracker handlers (callbacks + return the text handler)
     from sector_handler import register_sector_handlers
     register_sector_handlers(app)
