@@ -19,7 +19,7 @@ from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
 
-from telegram import Update
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 
 # Data layer — uses a-stock-data skill APIs
@@ -240,11 +240,15 @@ def _dedup_codes(chat_id, codes: list) -> tuple:
 # ============================================================
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📊 板块追踪", callback_data="sector_pick")],
+    ])
     await update.message.reply_text(
         "A股智能分析助手 v2 已就绪\n\n"
         "直接发送股票代码或名称，自动进入分析队列。\n"
         "支持单只分析 / 多只对比 / 截图识别。\n\n"
-        "发送 /help 查看完整用法。"
+        "发送 /help 查看完整用法。",
+        reply_markup=keyboard,
     )
 
 
@@ -310,6 +314,15 @@ async def cmd_delete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 # Message handler
 # ============================================================
+
+async def handle_message_with_sector(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Wrapper: if sector picker is awaiting input, route there; else fall through."""
+    if context.user_data.get("awaiting_sector_input"):
+        from sector_handler import handle_sector_text
+        await handle_sector_text(update, context)
+        return
+    await handle_message(update, context)
+
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = (update.message.text or "").strip()
@@ -523,7 +536,10 @@ def main():
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("help", cmd_help))
     app.add_handler(CommandHandler("delete", cmd_delete))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+    # Register sector-tracker handlers (callbacks + return the text handler)
+    from sector_handler import register_sector_handlers
+    register_sector_handlers(app)
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message_with_sector))
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     logger.info("Bot v2 starting (thin client mode — queues to Claude Code skills)...")
