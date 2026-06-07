@@ -321,6 +321,7 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
     main_board = filter_market_cap(main_board)
     valid_codes = {c["code"] for c in main_board}
     if len(main_board) >= 3:
+        rejected_codes: list[str] = []
         for attempt in range(MAX_RETRIES):
             med = pe_median(main_board)
             rejected_note = ""
@@ -346,6 +347,8 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
         logger.warning(f"API-driven path failed after {MAX_RETRIES} retries; falling back")
 
     # A: AI knowledge
+    rejected_codes: list[str] = []
+    rejected_reasons: list[str] = []
     for attempt in range(MAX_RETRIES):
         rejected_note = ""
         if attempt > 0:
