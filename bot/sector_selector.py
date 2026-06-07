@@ -261,39 +261,107 @@ def parse_deepseek_response(raw: str) -> dict:
 
 
 # =================================================================
+# Post-filter: validate DeepSeek picks against hard rules
+# =================================================================
+def validate_picks(picks: list[dict]) -> tuple[list[dict], list[dict]]:
+    """
+    Re-check DeepSeek-returned picks against the hard filters.
+    Returns (valid_picks, rejected_picks) where each rejected has a reason.
+    """
+    valid = []
+    rejected = []
+    for p in picks:
+        code = p.get("code", "")
+        name = p.get("name", "")
+        reasons = []
+        if not is_main_board(code):
+            reasons.append(f"{code} 非主板（科创/创业/B 股/北交所）")
+        if is_st(name):
+            reasons.append(f"{name} 含 ST")
+        # Quote-based checks
+        q = get_quote(code)
+        if not q:
+            reasons.append(f"{code} 拉不到实时行情")
+        else:
+            mc = q.get("total_mv", 0)
+            pe = q.get("pe", 0)
+            if not is_within_market_cap(mc):
+                reasons.append(f"{name} 市值 {mc:.0f} 亿超过 500 亿上限")
+            if pe <= 0:
+                reasons.append(f"{name} PE-TTM={pe}（亏损或无数据），不符合低 PE 要求")
+        if reasons:
+            rejected.append({**p, "reject_reasons": reasons})
+        else:
+            valid.append(p)
+    return valid, rejected
+
+
+# =================================================================
 # Top-level entry: A+B fallback
 # =================================================================
 def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) -> dict:
     """
-    A+B strategy:
-    1. Try B: build candidates from API -> DeepSeek filters -> 3 picks
-    2. On B failure (no candidates / DeepSeek error / parse error) -> A: feed concept name to DeepSeek
+    A+B strategy with post-filter validation:
+    1. Try B: build candidates from API -> DeepSeek filters -> validate -> 3 valid picks
+    2. Try B with feedback if some picks were rejected
+    3. On B failure -> A: feed concept name to DeepSeek -> validate -> 3 valid picks
+    4. On A failure -> A with feedback
+    5. If still < 3 valid after all retries -> {"error": "..."} (refuse to save bad data)
     Returns: {
       "picks": [...], "source": "api_driven" | "ai_knowledge",
+      "rejected": [...optional, for diagnostics]
     }
     On unrecoverable failure: {"error": "..."}
     """
+    MAX_RETRIES = 2
+
     # B: API-driven
     candidates = build_api_driven_candidates(concept_name, db_session)
     main_board = filter_main_board_non_st(candidates)
     main_board = filter_market_cap(main_board)
+    valid_codes = {c["code"] for c in main_board}
     if len(main_board) >= 3:
-        med = pe_median(main_board)
-        prompt = build_prompt_api_driven(concept_name, main_board, med)
-        raw = deepseek_callable(prompt)
-        parsed = parse_deepseek_response(raw)
-        if "picks" in parsed:
-            # Validate picks are subset of candidates
-            valid_codes = {c["code"] for c in main_board}
-            valid_picks = [p for p in parsed["picks"] if p["code"] in valid_codes]
-            if len(valid_picks) == 3:
-                return {"picks": valid_picks, "source": "api_driven"}
-        logger.warning(f"API-driven path failed: {parsed.get('error', 'unknown')}; falling back")
+        for attempt in range(MAX_RETRIES):
+            med = pe_median(main_board)
+            rejected_note = ""
+            if attempt > 0:
+                # Build feedback for retry
+                rejected_note = "\n\n注意：上一次的 picks 中以下代码被过滤，请重新选股时避开：\n" + \
+                    "\n".join(f"- {c}" for c in rejected_codes) + \
+                    "\n请从剩余合规列表中选 3 只。"
+            prompt = build_prompt_api_driven(concept_name, main_board, med) + rejected_note
+            raw = deepseek_callable(prompt)
+            parsed = parse_deepseek_response(raw)
+            if "picks" not in parsed:
+                break
+            # Validate picks are subset of candidates AND pass hard filters
+            in_candidates = [p for p in parsed["picks"] if p["code"] in valid_codes]
+            valid, rejected = validate_picks(in_candidates)
+            rejected_codes = [p["code"] for p in rejected]
+            if len(valid) == 3:
+                return {"picks": valid, "source": "api_driven", "rejected": rejected}
+            if len(valid) > 3:
+                return {"picks": valid[:3], "source": "api_driven", "rejected": rejected}
+            # else: retry with feedback (if we have retries left)
+        logger.warning(f"API-driven path failed after {MAX_RETRIES} retries; falling back")
 
     # A: AI knowledge
-    prompt = build_prompt_ai_knowledge(concept_name)
-    raw = deepseek_callable(prompt)
-    parsed = parse_deepseek_response(raw)
-    if "picks" in parsed:
-        return {"picks": parsed["picks"], "source": "ai_knowledge"}
-    return {"error": parsed.get("error", "AI knowledge path failed")}
+    for attempt in range(MAX_RETRIES):
+        rejected_note = ""
+        if attempt > 0:
+            rejected_note = "\n\n注意：上一次的 picks 中以下代码被过滤（不符合主板/市值/PE 要求），请重新选股时避开：\n" + \
+                "\n".join(f"- {c} ({r})" for c, r in zip(rejected_codes, rejected_reasons)) + \
+                "\n请重新推荐 3 只符合所有硬性条件的股票。"
+        prompt = build_prompt_ai_knowledge(concept_name) + rejected_note
+        raw = deepseek_callable(prompt)
+        parsed = parse_deepseek_response(raw)
+        if "picks" not in parsed:
+            break
+        valid, rejected = validate_picks(parsed["picks"])
+        rejected_codes = [p["code"] for p in rejected]
+        rejected_reasons = ["; ".join(p.get("reject_reasons", [])) for p in rejected]
+        if len(valid) == 3:
+            return {"picks": valid, "source": "ai_knowledge", "rejected": rejected}
+        if len(valid) > 3:
+            return {"picks": valid[:3], "source": "ai_knowledge", "rejected": rejected}
+    return {"error": f"AI 选股经过 {MAX_RETRIES} 轮校验仍无法凑齐 3 只合规股票。已拒绝: {rejected_codes}"}
