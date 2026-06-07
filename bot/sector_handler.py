@@ -22,14 +22,15 @@ from astock_data import get_quote  # noqa: E402
 from app.database import SessionLocal  # noqa: E402
 from app.models.sector_pick import SectorPick, SectorPickStock  # noqa: E402
 from sector_selector import select_stocks_for_concept  # noqa: E402
+from ai_analyzer import call_deepseek_raw  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
-# Placeholder for DeepSeek callable. Real implementation lives in Task 14.
+# Real DeepSeek call delegated to ai_analyzer. Caller (sector_selector) parses JSON.
 def call_deepseek(prompt: str) -> str:
-    """Placeholder for DeepSeek call. Real implementation in Task 14."""
-    return '{"picks":[{"code":"002812","name":"测试","reason":"占位 - 待接真实 DeepSeek"}]}'
+    """Thin wrapper around ai_analyzer.call_deepseek_raw. Returns raw model text."""
+    return call_deepseek_raw(prompt)
 
 
 # In-memory map: user_id -> sector_name awaiting confirmation

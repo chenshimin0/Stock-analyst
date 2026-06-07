@@ -767,6 +767,44 @@ def recommend_stocks_by_sector(query: str, top_n: int = 3) -> dict:
 		raise
 
 
+def call_deepseek_raw(prompt: str, system: str = "You are a Chinese A-share stock analyst.") -> str:
+	"""Generic DeepSeek call: takes a prompt, returns raw text response.
+
+	Does NOT parse JSON. Caller is responsible for parsing.
+	Raises RuntimeError on API failure.
+	"""
+	api_key = load_api_key("DEEPSEEK_ENC_KEY")
+
+	payload = json.dumps({
+		"model": MODEL,
+		"messages": [
+			{"role": "system", "content": system},
+			{"role": "user", "content": prompt},
+		],
+		"temperature": 0.7,
+		"max_tokens": 4096,
+	}, ensure_ascii=False).encode("utf-8")
+
+	req = urllib.request.Request(
+		DEEPSEEK_URL,
+		data=payload,
+		headers={
+			"Content-Type": "application/json",
+			"Authorization": f"Bearer {api_key}",
+		},
+	)
+
+	try:
+		resp = urllib.request.urlopen(req, timeout=90)
+		result = json.loads(resp.read())
+		content = result["choices"][0]["message"]["content"]
+		logger.info(f"DeepSeek raw call completed ({len(content)} chars)")
+		return content
+	except Exception as e:
+		logger.error(f"DeepSeek API 调用失败: {e}")
+		raise RuntimeError(f"DeepSeek API call failed: {e}") from e
+
+
 # ============================================================
 # V2: Natural Language Analysis (Markdown output, section parsing)
 # ============================================================
