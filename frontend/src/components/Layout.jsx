@@ -17,6 +17,7 @@ export default function Layout() {
         <div className="logo">A股分析系统</div>
         <NavLink to="/" className={linkClass} end onClick={closeSidebar}>报告列表</NavLink>
         <NavLink to="/winrate" className={linkClass} onClick={closeSidebar}>胜率分析</NavLink>
+        <NavLink to="/sector-tracker" className={linkClass} onClick={closeSidebar}>📊 板块追踪</NavLink>
       </nav>
       <main className="main-content">
         <Outlet />
