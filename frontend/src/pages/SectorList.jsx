@@ -57,7 +57,7 @@ export default function SectorList() {
       {!loading && picks.length > 0 && (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ background: '#f5f5f5' }}>
+            <tr style={{ background: '#37474f', color: '#fff' }}>
               <th style={th}>板块</th>
               <th style={th}>状态</th>
               <th style={th}>数据源</th>
@@ -116,5 +116,5 @@ function Pct({ value }) {
   return <span style={{ color, fontWeight: 600 }}>{value > 0 ? '+' : ''}{value.toFixed(2)}%</span>;
 }
 
-const th = { padding: '8px 12px', textAlign: 'left', fontSize: 13 };
+const th = { padding: '8px 12px', textAlign: 'left', fontSize: 13, color: '#fff' };
 const td = { padding: '8px 12px', fontSize: 14 };
