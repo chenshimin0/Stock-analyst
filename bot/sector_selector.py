@@ -173,7 +173,8 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
     Returns: list of {code, name, industry, mcap_yi, pe_ttm}.
     """
     # Source 1: realtime hot reason
-    members: dict[str, dict] = fetch_concept_members_realtime(sector_name) or []
+    realtime = fetch_concept_members_realtime(sector_name)
+    members: dict[str, dict] = {m["stock_code"]: m for m in (realtime or [])}
     # Source 2: cache
     cached = get_cached_members(sector_name, db_session)
     for m in cached:
