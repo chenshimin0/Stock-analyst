@@ -577,16 +577,20 @@ def main():
 
     app = Application.builder().token(BOT_TOKEN).request(request).build()
 
-    # Register bot menu commands (left-bottom "Menu" button)
+    # Register bot menu commands (left-bottom "Menu" button) on startup
     from telegram import BotCommand
-    app.bot.set_my_commands([
-        BotCommand("start",     "🏠 启动 / 查看欢迎"),
-        BotCommand("analyze",   "📈 分析个股（用法 /analyze 600519）"),
-        BotCommand("compare",   "🔀 多股对比（用法 /compare 600519 000858）"),
-        BotCommand("sector",    "📊 板块追踪（按概念选 3 只 + 5/10/20 日追踪）"),
-        BotCommand("delete",    "🗑️ 删除指定股票报告（用法 /delete 600519）"),
-        BotCommand("help",      "❓ 完整使用帮助"),
-    ])
+    async def _set_commands_on_startup(application: Application) -> None:
+        await application.bot.set_my_commands([
+            BotCommand("start",     "🏠 启动 / 查看欢迎"),
+            BotCommand("analyze",   "📈 分析个股（用法 /analyze 600519）"),
+            BotCommand("compare",   "🔀 多股对比（用法 /compare 600519 000858）"),
+            BotCommand("sector",    "📊 板块追踪（按概念选 3 只 + 5/10/20 日追踪）"),
+            BotCommand("delete",    "🗑️ 删除指定股票报告（用法 /delete 600519）"),
+            BotCommand("help",      "❓ 完整使用帮助"),
+        ])
+        logger.info("Bot menu commands registered")
+
+    app.post_init = _set_commands_on_startup
 
     async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
         logger.error(f"Global error: {context.error}", exc_info=context.error)
