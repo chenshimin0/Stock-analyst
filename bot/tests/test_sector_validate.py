@@ -102,3 +102,39 @@ def test_validate_mixed_clean_and_dirty(monkeypatch):
     assert len(valid) == 1
     assert len(rejected) == 2
     assert {r["code"] for r in rejected} == {"600703", "300750"}
+
+
+# =================================================================
+# New prompt tests (single-path: candidate pool or AI knowledge)
+# =================================================================
+def test_prompt_with_candidates_includes_table():
+    from sector_selector import build_prompt_ai_knowledge
+    candidates = [
+        {"code": "600378", "name": "昊华科技", "mcap_yi": 499.82, "pe_ttm": 38.34},
+        {"code": "002812", "name": "恩捷股份", "mcap_yi": 450, "pe_ttm": 25},
+    ]
+    p = build_prompt_ai_knowledge("pvdf", candidates)
+    assert "pvdf" in p
+    assert "600378" in p
+    assert "昊华科技" in p
+    # Market cap rendered as integer (499.82 -> 500), so check for code only
+    assert "硬性条件" in p
+    assert "候选池" in p
+
+
+def test_prompt_without_candidates_uses_knowledge():
+    from sector_selector import build_prompt_ai_knowledge
+    p = build_prompt_ai_knowledge("pvdf", None)
+    assert "pvdf" in p
+    assert "概念板块" in p
+    assert "候选池" not in p  # no table when no candidates
+    # Knowledge prompt uses bullet list, not "硬性条件" header
+    assert "沪深主板" in p
+    assert "总市值" in p
+
+
+def test_prompt_with_empty_candidates_uses_knowledge():
+    from sector_selector import build_prompt_ai_knowledge
+    p = build_prompt_ai_knowledge("太赫兹", [])
+    assert "太赫兹" in p
+    assert "候选池" not in p

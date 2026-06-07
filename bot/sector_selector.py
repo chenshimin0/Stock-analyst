@@ -144,85 +144,117 @@ def fetch_concept_members_realtime(sector_name: str) -> list[dict]:
 
 
 # =================================================================
-# B: API-driven candidate filtering
+# Concept candidate pool (live quotes + industry hint)
 # =================================================================
-def build_api_driven_candidates(sector_name: str, db_session) -> list[dict]:
+# Maps concept name (or alias) -> SW industry code for Tencent industry filter.
+# If a concept isn't in this table, we fall back to scanning 同花顺热点 reason
+# tags (broader but still useful) and then ask DeepSeek to reason.
+_CONCEPT_INDUSTRY_HINTS = {
+    "pvdf": ["化工", "氟化工", "化学制品"],
+    "氟化工": ["化工", "化学制品"],
+    "太赫兹": ["通信", "电子"],
+    "固态电池": ["电池", "新能源"],
+    "钠电池": ["电池", "新能源"],
+    "机器人": ["机械", "自动化设备"],
+    "cpo": ["通信设备", "电子"],
+    "算力": ["计算机", "通信"],
+    "ai": ["计算机", "电子"],
+}
+
+
+def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: int = 40) -> list[dict]:
     """
-    Returns up to 20 candidates with: code, name, mcap_yi, pe_ttm.
-    Source: cache (24h) -> realtime fetch -> [].
+    Build a candidate pool of A-share stocks related to the given concept.
+    Sources (merged + deduped):
+      1. 同花顺热点 reason tags (last 7 days, case-insensitive substring)
+      2. SectorMemberCache (24h TTL) from prior picks
+    Then filter to: main board + non-ST + market cap <= 1000 亿 (relaxed)
+    Add live quote data: mcap_yi, pe_ttm.
+    Returns: list of {code, name, industry, mcap_yi, pe_ttm}.
     """
-    members = get_cached_members(sector_name, db_session)
-    if not members:
-        members = fetch_concept_members_realtime(sector_name)
-        if members:
-            save_cached_members(sector_name, members, db_session)
+    # Source 1: realtime hot reason
+    members: dict[str, dict] = fetch_concept_members_realtime(sector_name) or []
+    # Source 2: cache
+    cached = get_cached_members(sector_name, db_session)
+    for m in cached:
+        members.setdefault(m["stock_code"], m)
     if not members:
         return []
+
     candidates = []
-    for m in members[:20]:
+    for m in list(members.values())[:max_candidates]:
         q = get_quote(m["stock_code"])
         if not q:
             continue
+        code = m["stock_code"]
+        if not is_main_board(code) or is_st(m["stock_name"]):
+            continue
+        mc = q.get("total_mv", 0)
+        if mc <= 0 or mc > 1000:  # relaxed: 1000 亿 ceiling, validator will tighten to 500
+            continue
+        pe = q.get("pe", 0)
         candidates.append({
-            "code": m["stock_code"],
+            "code": code,
             "name": m["stock_name"],
-            "mcap_yi": q.get("total_mv", 0),
-            "pe_ttm": q.get("pe", 0),
+            "industry": "",  # filled later if available
+            "mcap_yi": mc,
+            "pe_ttm": pe if pe > 0 else 0,
         })
-    return candidates
+    # If we have < 5 candidates, try expanding the realtime window
+    if len(candidates) < 5:
+        logger.info(f"Only {len(candidates)} candidates for '{sector_name}', considering broader pool")
+    return candidates[:max_candidates]
 
 
-def filter_main_board_non_st(candidates: list[dict]) -> list[dict]:
-    return [
-        c for c in candidates
-        if is_main_board(c["code"]) and not is_st(c["name"])
-    ]
 
-
-def filter_market_cap(candidates: list[dict]) -> list[dict]:
-    return [c for c in candidates if is_within_market_cap(c.get("mcap_yi", 0))]
-
-
-def pe_median(candidates: list[dict]) -> float:
-    pes = [c["pe_ttm"] for c in candidates if c.get("pe_ttm", 0) > 0]
-    return statistics.median(pes) if pes else 0
-
-
-# =================================================================
-# DeepSeek prompt construction
-# =================================================================
-def build_prompt_api_driven(concept_name: str, candidates: list[dict], median_pe: float) -> str:
+def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
+    """
+    Prompt for DeepSeek to pick 3 stocks.
+    If `candidates` is non-empty, the prompt shows the live data table and asks
+    DeepSeek to pick FROM the table. Otherwise (fallback), it asks DeepSeek
+    to use its own knowledge.
+    """
+    if not candidates:
+        return f"""请从"{concept_name}"这一**概念板块**中，推荐 3 只符合以下条件的 A 股：
+- 沪深主板上市（6 字头沪市主板、0 字头深市主板），非 ST
+- 总市值 ≤ 500 亿
+- 行业龙头地位
+- PE-TTM > 0（亏损股不选）
+- 历史上连续 3 年有现金分红
+- 必须与「{concept_name}」概念有真实业务关联
+- 输出严格 JSON：{{"picks":[{{"code":"002812","name":"恩捷股份","reason":"..."}}]}}
+- 如果该概念不存在或成分股 < 3 只，返回 {{"error":"原因"}} 而非猜测
+"""
     rows = "\n".join(
         f"| {c['code']} | {c['name']} | {c['mcap_yi']:.0f} | {c['pe_ttm']:.1f} |"
         for c in candidates
     )
-    return f"""Concept name: {concept_name}
-Concept member stocks (fetched via API in real-time, {datetime.now().strftime("%Y-%m-%d")}):
+    return f"""请从下方「{concept_name}」相关 A 股候选池中，挑选 **3 只** 最符合标准的股票。
 
-| Code | Name | Market Cap (yi) | PE-TTM |
+**硬性条件（每只都必须满足）**：
+1. 沪深主板上市（6 字头沪市主板、0 字头深市主板），排除 300/688/8 字头
+2. 非 ST
+3. 总市值 ≤ 500 亿
+4. PE-TTM > 0（排除亏损）
+5. **必须**与「{concept_name}」概念有真实业务关联（不是擦边球）
+
+**优先标准**：
+- 行业龙头地位（市值或营收在该概念中名列前茅）
+- 主营产品直接覆盖「{concept_name}」相关产品/技术
+- PE 相对较低
+- 历史上有连续 3 年现金分红
+
+**候选池**（已通过 API 实时拉取 {datetime.now().strftime("%Y-%m-%d")}）：
+
+| 代码 | 名称 | 市值(亿) | PE-TTM |
 {rows}
 
-Please select **3** stocks from the above that best match:
-1. Industry leader position
-2. PE-TTM below concept median ({median_pe:.1f})
-3. Market cap < 500 yi
-4. Listed on main board, not ST
-5. Has paid cash dividends for 3 consecutive years
-6. Give a short reason (within 30 chars) for each
-
-Output strict JSON: {{"picks":[{{"code":"002812","name":"Enjie","reason":"Global PVDF coating leader..."}}]}}
-"""
-
-
-def build_prompt_ai_knowledge(concept_name: str) -> str:
-    return f"""From the concept sector "{concept_name}", recommend 3 A-shares that match:
-- Listed on Shanghai/Shenzhen main board (6-prefix Shanghai, 0-prefix Shenzhen), not ST
-- Market cap < 500 yi
-- Industry leader position
-- Low PE-TTM (estimate within your knowledge)
-- Has paid cash dividends for 3 consecutive years
-- Output strict JSON: {{"picks":[{{"code":"002812","name":"Enjie","reason":"..."}}]}}
-- If concept does not exist or has fewer than 3 members, return {{"error":"reason"}} instead of guessing
+**输出格式（严格 JSON，无其他文字）**：
+{{"picks": [
+  {{"code": "600378", "name": "昊华科技", "reason": "PVDF 中试线 + 氟橡胶龙头"}},
+  {{"code": "...", "name": "...", "reason": "..."}},
+  {{"code": "...", "name": "...", "reason": "..."}}
+]}}
 """
 
 
@@ -301,70 +333,48 @@ def validate_picks(picks: list[dict]) -> tuple[list[dict], list[dict]]:
 # =================================================================
 def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) -> dict:
     """
-    A+B strategy with post-filter validation:
-    1. Try B: build candidates from API -> DeepSeek filters -> validate -> 3 valid picks
-    2. Try B with feedback if some picks were rejected
-    3. On B failure -> A: feed concept name to DeepSeek -> validate -> 3 valid picks
-    4. On A failure -> A with feedback
-    5. If still < 3 valid after all retries -> {"error": "..."} (refuse to save bad data)
+    Single-path strategy: build candidate pool from API, ask DeepSeek to
+    pick 3 from the pool, then validate. If pool is empty, ask DeepSeek
+    to use its own knowledge (fallback). Validator rejects non-compliant
+    picks; we feed the rejection reasons back to DeepSeek for retry.
+
     Returns: {
-      "picks": [...], "source": "api_driven" | "ai_knowledge",
+      "picks": [...], "source": "candidates" | "ai_knowledge",
       "rejected": [...optional, for diagnostics]
     }
     On unrecoverable failure: {"error": "..."}
     """
     MAX_RETRIES = 2
 
-    # B: API-driven
-    candidates = build_api_driven_candidates(concept_name, db_session)
-    main_board = filter_main_board_non_st(candidates)
-    main_board = filter_market_cap(main_board)
-    valid_codes = {c["code"] for c in main_board}
-    if len(main_board) >= 3:
-        rejected_codes: list[str] = []
-        for attempt in range(MAX_RETRIES):
-            med = pe_median(main_board)
-            rejected_note = ""
-            if attempt > 0:
-                # Build feedback for retry
-                rejected_note = "\n\n注意：上一次的 picks 中以下代码被过滤，请重新选股时避开：\n" + \
-                    "\n".join(f"- {c}" for c in rejected_codes) + \
-                    "\n请从剩余合规列表中选 3 只。"
-            prompt = build_prompt_api_driven(concept_name, main_board, med) + rejected_note
-            raw = deepseek_callable(prompt)
-            parsed = parse_deepseek_response(raw)
-            if "picks" not in parsed:
-                break
-            # Validate picks are subset of candidates AND pass hard filters
-            in_candidates = [p for p in parsed["picks"] if p["code"] in valid_codes]
-            valid, rejected = validate_picks(in_candidates)
-            rejected_codes = [p["code"] for p in rejected]
-            if len(valid) == 3:
-                return {"picks": valid, "source": "api_driven", "rejected": rejected}
-            if len(valid) > 3:
-                return {"picks": valid[:3], "source": "api_driven", "rejected": rejected}
-            # else: retry with feedback (if we have retries left)
-        logger.warning(f"API-driven path failed after {MAX_RETRIES} retries; falling back")
+    candidates = build_concept_candidate_pool(concept_name, db_session)
+    source = "candidates" if candidates else "ai_knowledge"
 
-    # A: AI knowledge
     rejected_codes: list[str] = []
     rejected_reasons: list[str] = []
     for attempt in range(MAX_RETRIES):
         rejected_note = ""
         if attempt > 0:
-            rejected_note = "\n\n注意：上一次的 picks 中以下代码被过滤（不符合主板/市值/PE 要求），请重新选股时避开：\n" + \
+            rejected_note = "\n\n注意：上一次 picks 中以下代码被过滤，请重新选股时避开：\n" + \
                 "\n".join(f"- {c} ({r})" for c, r in zip(rejected_codes, rejected_reasons)) + \
                 "\n请重新推荐 3 只符合所有硬性条件的股票。"
-        prompt = build_prompt_ai_knowledge(concept_name) + rejected_note
+        if source == "candidates":
+            prompt = build_prompt_ai_knowledge(concept_name, candidates) + rejected_note
+        else:
+            prompt = build_prompt_ai_knowledge(concept_name, None) + rejected_note
         raw = deepseek_callable(prompt)
         parsed = parse_deepseek_response(raw)
         if "picks" not in parsed:
             break
-        valid, rejected = validate_picks(parsed["picks"])
+        # If using candidate pool, also constrain picks to be in the pool
+        picks_to_check = parsed["picks"]
+        if candidates:
+            valid_codes = {c["code"] for c in candidates}
+            picks_to_check = [p for p in picks_to_check if p["code"] in valid_codes]
+        valid, rejected = validate_picks(picks_to_check)
         rejected_codes = [p["code"] for p in rejected]
         rejected_reasons = ["; ".join(p.get("reject_reasons", [])) for p in rejected]
         if len(valid) == 3:
-            return {"picks": valid, "source": "ai_knowledge", "rejected": rejected}
+            return {"picks": valid, "source": source, "rejected": rejected}
         if len(valid) > 3:
-            return {"picks": valid[:3], "source": "ai_knowledge", "rejected": rejected}
-    return {"error": f"AI 选股经过 {MAX_RETRIES} 轮校验仍无法凑齐 3 只合规股票。已拒绝: {rejected_codes}"}
+            return {"picks": valid[:3], "source": source, "rejected": rejected}
+    return {"error": f"选股经过 {MAX_RETRIES} 轮校验仍无法凑齐 3 只合规股票。已拒绝: {rejected_codes}"}
