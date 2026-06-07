@@ -23,8 +23,9 @@ def test_is_st():
 
 def test_is_within_market_cap():
     assert is_within_market_cap(450.0) is True
-    assert is_within_market_cap(500.0) is True  # boundary
-    assert is_within_market_cap(500.01) is False
+    assert is_within_market_cap(500.0) is True
+    assert is_within_market_cap(1000.0) is True  # boundary (industry leader 龙头)
+    assert is_within_market_cap(1000.01) is False
     assert is_within_market_cap(0) is False
     assert is_within_market_cap(-10) is False
 

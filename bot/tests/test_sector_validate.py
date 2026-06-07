@@ -36,15 +36,25 @@ def test_validate_rejects_star_market(monkeypatch):
 
 
 def test_validate_rejects_oversized_market_cap(monkeypatch):
-    """三安光电: 市值 843 亿 > 500."""
+    """市值 1500 亿 > 1000 上限应被拒."""
     _mock_quote(monkeypatch, {
-        "600703": {"code": "600703", "name": "三安光电", "pe": -169, "total_mv": 843.64},
+        "600703": {"code": "600703", "name": "三安光电", "pe": 30, "total_mv": 1500},
     })
     picks = [{"code": "600703", "name": "三安光电", "reason": "LED 龙头"}]
     valid, rejected = validate_picks(picks)
     assert len(valid) == 0
-    assert any("市值" in r for r in rejected[0]["reject_reasons"])
-    assert any("PE" in r or "亏损" in r for r in rejected[0]["reject_reasons"])
+    assert any("市值" in r and "1000" in r for r in rejected[0]["reject_reasons"])
+
+
+def test_validate_accepts_1000yi_leader(monkeypatch):
+    """市值 1000 亿（含）的行业龙头应被接受（用户优先级：龙头 > 市值要求）."""
+    _mock_quote(monkeypatch, {
+        "600519": {"code": "600519", "name": "贵州茅台", "pe": 25, "total_mv": 999.99},
+    })
+    picks = [{"code": "600519", "name": "贵州茅台", "reason": "白酒龙头"}]
+    valid, rejected = validate_picks(picks)
+    assert len(valid) == 1
+    assert len(rejected) == 0
 
 
 def test_validate_rejects_negative_pe(monkeypatch):

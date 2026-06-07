@@ -40,8 +40,8 @@ def is_st(name: str) -> bool:
 
 
 def is_within_market_cap(mcap_yi: float) -> bool:
-    """Market cap (in 100M CNY) <= 500."""
-    return 0 < mcap_yi <= 500
+    """Market cap (in 100M CNY) <= 1000. Industry leader > market cap cap."""
+    return 0 < mcap_yi <= 1000
 
 
 def is_within_pe_median(pe_ttm: float, median_pe: float) -> bool:
@@ -217,7 +217,7 @@ def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
     if not candidates:
         return f"""请从"{concept_name}"这一**概念板块**中，推荐 3 只符合以下条件的 A 股：
 - 沪深主板上市（6 字头沪市主板、0 字头深市主板），非 ST
-- 总市值 ≤ 500 亿
+- 总市值 ≤ 1000 亿（行业龙头 > 市值要求，龙头可达 1000 亿）
 - 行业龙头地位
 - PE-TTM > 0（亏损股不选）
 - 历史上连续 3 年有现金分红
@@ -234,7 +234,7 @@ def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
 **硬性条件（每只都必须满足）**：
 1. 沪深主板上市（6 字头沪市主板、0 字头深市主板），排除 300/688/8 字头
 2. 非 ST
-3. 总市值 ≤ 500 亿
+3. 总市值 ≤ 1000 亿（行业龙头 > 市值要求，龙头可放宽到此上限）
 4. PE-TTM > 0（排除亏损）
 5. **必须**与「{concept_name}」概念有真实业务关联（不是擦边球）
 
@@ -318,7 +318,7 @@ def validate_picks(picks: list[dict]) -> tuple[list[dict], list[dict]]:
             mc = q.get("total_mv", 0)
             pe = q.get("pe", 0)
             if not is_within_market_cap(mc):
-                reasons.append(f"{name} 市值 {mc:.0f} 亿超过 500 亿上限")
+                reasons.append(f"{name} 市值 {mc:.0f} 亿超过 1000 亿上限")
             if pe <= 0:
                 reasons.append(f"{name} PE-TTM={pe}（亏损或无数据），不符合低 PE 要求")
         if reasons:
