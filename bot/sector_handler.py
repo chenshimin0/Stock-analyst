@@ -48,10 +48,11 @@ async def handle_sector_button(update: Update, context: ContextTypes.DEFAULT_TYP
 
 
 # === User text input ===
-async def handle_sector_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_sector_text(update: Update, context: ContextTypes.DEFAULT_TYPE, text_override: str = None):
     if not context.user_data.get("awaiting_sector_input"):
         return
-    concept_name = update.message.text.strip()
+    raw = text_override if text_override is not None else (update.message.text or "")
+    concept_name = raw.strip()
     context.user_data["awaiting_sector_input"] = False
     user_id = update.effective_user.id
     db = SessionLocal()

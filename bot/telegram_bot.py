@@ -327,9 +327,7 @@ async def cmd_analyze(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("用法: /analyze <股票代码>\n例如: /analyze 600519")
         return
     text = " ".join(context.args)
-    # Reuse handle_message logic by faking a text message update
-    update.message.text = text
-    await handle_message(update, context)
+    await handle_message(update, context, text_override=text)
 
 
 async def cmd_compare(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -338,14 +336,13 @@ async def cmd_compare(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("用法: /compare <代码1> <代码2> [代码3 ...]\n例如: /compare 600519 000858")
         return
     text = "对比 " + " ".join(context.args)
-    update.message.text = text
-    await handle_message(update, context)
+    await handle_message(update, context, text_override=text)
 
 
 async def cmd_sector(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Sector tracking entry. Usage: /sector pvdf or just /sector to start."""
-    from sector_handler import handle_sector_button
     if not context.args:
+        from sector_handler import handle_sector_button
         # Same flow as the inline button
         class _FakeQuery:
             def __init__(self, msg):
@@ -357,11 +354,10 @@ async def cmd_sector(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await handle_sector_button(fake_update, context)
         return
     concept = " ".join(context.args).strip()
-    # Set flag and call sector text handler directly
+    # Set flag and call sector text handler directly with the concept as text
     context.user_data["awaiting_sector_input"] = True
-    update.message.text = concept
     from sector_handler import handle_sector_text
-    await handle_sector_text(update, context)
+    await handle_sector_text(update, context, text_override=concept)
 
 
 # ============================================================
@@ -377,8 +373,8 @@ async def handle_message_with_sector(update: Update, context: ContextTypes.DEFAU
     await handle_message(update, context)
 
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = (update.message.text or "").strip()
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE, text_override: Optional[str] = None):
+    text = (text_override if text_override is not None else update.message.text or "").strip()
     if not text:
         return
 
