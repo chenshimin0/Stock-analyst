@@ -1,6 +1,6 @@
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from sector_selector import is_main_board, is_st, is_within_market_cap, is_within_pe_median
+from sector_selector import is_main_board, is_st
 
 
 def test_is_main_board():
@@ -19,21 +19,3 @@ def test_is_st():
     assert is_st("ST华联") is True
     assert is_st("*ST大集") is True
     assert is_st("st国华") is True  # case-insensitive
-
-
-def test_is_within_market_cap():
-    assert is_within_market_cap(450.0) is True
-    assert is_within_market_cap(500.0) is True
-    assert is_within_market_cap(1000.0) is True  # boundary (industry leader 龙头)
-    assert is_within_market_cap(1000.01) is False
-    assert is_within_market_cap(0) is False
-    assert is_within_market_cap(-10) is False
-
-
-def test_is_within_pe_median():
-    pe_list = [10, 20, 30, 40, 50, 60, 70]
-    median = 40
-    assert is_within_pe_median(20, median) is True   # below median
-    assert is_within_pe_median(40, median) is False  # at median
-    assert is_within_pe_median(0, median) is False   # no data
-    assert is_within_pe_median(-5, median) is False  # negative (loss)

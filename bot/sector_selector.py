@@ -39,14 +39,6 @@ def is_st(name: str) -> bool:
     return "ST" in n
 
 
-def is_within_market_cap(mcap_yi: float) -> bool:
-    """Market cap (in 100M CNY) <= 1000. Industry leader > market cap cap."""
-    return 0 < mcap_yi <= 1000
-
-
-def is_within_pe_median(pe_ttm: float, median_pe: float) -> bool:
-    """PE-TTM below concept median."""
-    return pe_ttm > 0 and pe_ttm < median_pe
 
 
 # =================================================================
@@ -190,8 +182,10 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
         code = m["stock_code"]
         if not is_main_board(code) or is_st(m["stock_name"]):
             continue
+        # No market cap or PE filter — DeepSeek decides who's a leader.
+        # Just require Tencent to give us a live price (mc > 0 means it's a real stock).
         mc = q.get("total_mv", 0)
-        if mc <= 0 or mc > 1000:  # relaxed: 1000 亿 ceiling, validator will tighten to 500
+        if mc <= 0:
             continue
         pe = q.get("pe", 0)
         candidates.append({
@@ -216,13 +210,10 @@ def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
     to use its own knowledge.
     """
     if not candidates:
-        return f"""请从"{concept_name}"这一**概念板块**中，推荐 3 只符合以下条件的 A 股：
+        return f"""请从"{concept_name}"这一**概念板块**中，推荐 3 只 A 股：
 - 沪深主板上市（6 字头沪市主板、0 字头深市主板），非 ST
-- 总市值 ≤ 1000 亿（行业龙头 > 市值要求，龙头可达 1000 亿）
-- 行业龙头地位
-- PE-TTM > 0（亏损股不选）
-- 历史上连续 3 年有现金分红
-- 必须与「{concept_name}」概念有真实业务关联
+- **必须**与「{concept_name}」概念有真实业务关联（不是擦边球）
+- 优先行业龙头
 - 输出严格 JSON：{{"picks":[{{"code":"002812","name":"恩捷股份","reason":"..."}}]}}
 - 如果该概念不存在或成分股 < 3 只，返回 {{"error":"原因"}} 而非猜测
 """
@@ -230,20 +221,18 @@ def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
         f"| {c['code']} | {c['name']} | {c['mcap_yi']:.0f} | {c['pe_ttm']:.1f} |"
         for c in candidates
     )
-    return f"""请从下方「{concept_name}」相关 A 股候选池中，挑选 **3 只** 最符合标准的股票。
+    return f"""请从下方「{concept_name}」相关 A 股候选池中，挑选 **3 只** 股票。
 
-**硬性条件（每只都必须满足）**：
+**硬性条件**：
 1. 沪深主板上市（6 字头沪市主板、0 字头深市主板），排除 300/688/8 字头
 2. 非 ST
-3. 总市值 ≤ 1000 亿（行业龙头 > 市值要求，龙头可放宽到此上限）
-4. PE-TTM > 0（排除亏损）
-5. **必须**与「{concept_name}」概念有真实业务关联（不是擦边球）
+3. **必须**与「{concept_name}」概念有真实业务关联
 
 **优先标准**：
-- 行业龙头地位（市值或营收在该概念中名列前茅）
+- 行业龙头地位
 - 主营产品直接覆盖「{concept_name}」相关产品/技术
-- PE 相对较低
-- 历史上有连续 3 年现金分红
+
+（市值、PE、分红记录仅供参考，不作为硬性门槛）
 
 **候选池**（已通过 API 实时拉取 {datetime.now().strftime("%Y-%m-%d")}）：
 
@@ -294,12 +283,19 @@ def parse_deepseek_response(raw: str) -> dict:
 
 
 # =================================================================
-# Post-filter: validate DeepSeek picks against hard rules
+# Post-filter: consistency check + sanity (board, ST)
 # =================================================================
 def validate_picks(picks: list[dict]) -> tuple[list[dict], list[dict]]:
     """
-    Re-check DeepSeek-returned picks against the hard filters.
-    Returns (valid_picks, rejected_picks) where each rejected has a reason.
+    Minimal validator: only verify what's NOT a business judgment.
+    - 主板 (excludes 300/688/8/4/9) — structural
+    - 非 ST — structural
+    - Tencent has live quote for the code — sanity (no fabricated codes)
+
+    NOT checked here (DeepSeek's call):
+    - Market cap size (DeepSeek decides who's the leader)
+    - PE-TTM value (DeepSeek decides valuation)
+    - Business relevance to concept (DeepSeek's domain)
     """
     valid = []
     rejected = []
@@ -307,21 +303,16 @@ def validate_picks(picks: list[dict]) -> tuple[list[dict], list[dict]]:
         code = p.get("code", "")
         name = p.get("name", "")
         reasons = []
-        if not is_main_board(code):
+        if not re.match(r"^\d{6}$", code):
+            reasons.append(f"{code} 不是 6 位代码")
+        elif not is_main_board(code):
             reasons.append(f"{code} 非主板（科创/创业/B 股/北交所）")
         if is_st(name):
             reasons.append(f"{name} 含 ST")
-        # Quote-based checks
+        # Sanity: can Tencent actually quote this code?
         q = get_quote(code)
         if not q:
-            reasons.append(f"{code} 拉不到实时行情")
-        else:
-            mc = q.get("total_mv", 0)
-            pe = q.get("pe", 0)
-            if not is_within_market_cap(mc):
-                reasons.append(f"{name} 市值 {mc:.0f} 亿超过 1000 亿上限")
-            if pe <= 0:
-                reasons.append(f"{name} PE-TTM={pe}（亏损或无数据），不符合低 PE 要求")
+            reasons.append(f"{code} 拉不到实时行情（代码可能不存在）")
         if reasons:
             rejected.append({**p, "reject_reasons": reasons})
         else:

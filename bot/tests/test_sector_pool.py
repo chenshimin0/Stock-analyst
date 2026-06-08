@@ -93,14 +93,15 @@ def test_cache_and_realtime_merged(monkeypatch):
     assert by_code["002812"]["name"] == "恩捷股份(新版)"
 
 
-def test_filters_out_oversized(monkeypatch):
-    """Stocks > 1000 亿 are filtered out of the pool."""
+def test_accepts_large_cap_leader(monkeypatch):
+    """Large-cap leaders (e.g. 贵州茅台 1500 亿) are accepted into pool.
+    Size is DeepSeek's call, not the pool's."""
     from sector_selector import fetch_concept_members_realtime
     monkeypatch.setattr(
         "sector_selector.fetch_concept_members_realtime",
         lambda name: [
-            {"stock_code": "002812", "stock_name": "恩捷股份"},  # 450
-            {"stock_code": "600519", "stock_name": "贵州茅台"},  # 1500
+            {"stock_code": "002812", "stock_name": "恩捷股份"},
+            {"stock_code": "600519", "stock_name": "贵州茅台"},
         ],
     )
     from sector_selector import get_quote
@@ -110,8 +111,9 @@ def test_filters_out_oversized(monkeypatch):
     }.get(code, {}))
     db = _empty_db()
     out = build_concept_candidate_pool("test", db)
-    assert len(out) == 1
-    assert out[0]["code"] == "002812"
+    assert len(out) == 2
+    codes = {c["code"] for c in out}
+    assert codes == {"002812", "600519"}
 
 
 def test_filters_out_chinext(monkeypatch):
