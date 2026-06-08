@@ -133,7 +133,7 @@ async def _run_new_pick_in_chat(bot, chat_id: int, concept_name: str):
                 "",
                 f"可能原因：",
                 f"  • 概念过冷门，DeepSeek 知识截止 2024 年初",
-                f"  • 候选股大多市值 > 1000 亿（行业龙头但盘子太大）",
+                f"  • DeepSeek 推的股被主板/非 ST/可报价规则拒收",
                 f"  • 同花顺热点 7 天内没匹配该概念",
                 "",
                 f"建议：",

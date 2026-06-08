@@ -325,16 +325,14 @@ def validate_picks(picks: list[dict]) -> tuple[list[dict], list[dict]]:
 # =================================================================
 def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) -> dict:
     """
-    Single-path strategy: build candidate pool from API, ask DeepSeek to
-    pick 3 from the pool, then validate. If pool is empty, ask DeepSeek
-    to use its own knowledge (fallback). Validator rejects non-compliant
-    picks; we feed the rejection reasons back to DeepSeek for retry.
+    Strategy: build a candidate pool (hint, not strict whitelist), ask
+    DeepSeek to pick 3. Pass the pool to the prompt as a "you may want
+    to consider these". Validator only checks structural rules (主板,
+    非 ST, 6-digit, Tencent has live quote).
 
-    Returns: {
-      "picks": [...], "source": "candidates" | "ai_knowledge",
-      "rejected": [...optional, for diagnostics]
-    }
-    On unrecoverable failure: {"error": "..."}
+    The pool is NOT enforced as a whitelist — DeepSeek can pick stocks
+    not in the pool if it knows they're better candidates (e.g. for
+    cold concepts where the pool has 0-1 stocks).
     """
     MAX_RETRIES = 2
 
@@ -346,9 +344,9 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
     for attempt in range(MAX_RETRIES):
         rejected_note = ""
         if attempt > 0:
-            rejected_note = "\n\n注意：上一次 picks 中以下代码被过滤，请重新选股时避开：\n" + \
+            rejected_note = "\n\n注意：上一次 picks 中以下代码被系统拒收，请重新选股时避开：\n" + \
                 "\n".join(f"- {c} ({r})" for c, r in zip(rejected_codes, rejected_reasons)) + \
-                "\n请重新推荐 3 只符合所有硬性条件的股票。"
+                "\n请重新推荐 3 只合规股票。"
         if source == "candidates":
             prompt = build_prompt_ai_knowledge(concept_name, candidates) + rejected_note
         else:
@@ -357,16 +355,11 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
         parsed = parse_deepseek_response(raw)
         if "picks" not in parsed:
             break
-        # If using candidate pool, also constrain picks to be in the pool
-        picks_to_check = parsed["picks"]
-        if candidates:
-            valid_codes = {c["code"] for c in candidates}
-            picks_to_check = [p for p in picks_to_check if p["code"] in valid_codes]
-        valid, rejected = validate_picks(picks_to_check)
+        # NOTE: candidate pool is a HINT in the prompt, not a strict
+        # whitelist. We do NOT filter DeepSeek's picks to the pool here.
+        valid, rejected = validate_picks(parsed["picks"])
         rejected_codes = [p["code"] for p in rejected]
         rejected_reasons = ["; ".join(p.get("reject_reasons", [])) for p in rejected]
-        if len(valid) == 3:
-            return {"picks": valid, "source": source, "rejected": rejected}
-        if len(valid) > 3:
+        if len(valid) >= 3:
             return {"picks": valid[:3], "source": source, "rejected": rejected}
-    return {"error": f"选股经过 {MAX_RETRIES} 轮校验仍无法凑齐 3 只合规股票。已拒绝: {rejected_codes}"}
+    return {"error": f"选股经过 {MAX_RETRIES} 轮仍无法凑齐 3 只合规股票。已拒绝: {rejected_codes or '无'}"}

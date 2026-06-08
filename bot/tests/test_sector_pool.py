@@ -116,6 +116,62 @@ def test_accepts_large_cap_leader(monkeypatch):
     assert codes == {"002812", "600519"}
 
 
+# =================================================================
+# select_stocks_for_concept tests (pool as HINT, not whitelist)
+# =================================================================
+def test_select_accepts_picks_outside_small_pool(monkeypatch):
+    """When the candidate pool has only 1 stock but DeepSeek picks 3, all 3
+    should be accepted (pool is hint not strict whitelist)."""
+    from sector_selector import (
+        select_stocks_for_concept,
+        fetch_concept_members_realtime,
+    )
+    # Pool has only 1 stock
+    monkeypatch.setattr(
+        "sector_selector.fetch_concept_members_realtime",
+        lambda name: [{"stock_code": "002407", "stock_name": "多氟多"}],
+    )
+    from sector_selector import get_quote
+    monkeypatch.setattr("sector_selector.get_quote", lambda code: {
+        "002407": {"code": "002407", "name": "多氟多", "total_mv": 358, "pe": 75, "pb": 5},
+        "600309": {"code": "600309", "name": "万华化学", "total_mv": 2268, "pe": 17, "pb": 2},
+        "600141": {"code": "600141", "name": "兴发集团", "total_mv": 351, "pe": 24, "pb": 1},
+    }.get(code, {}))
+    # DeepSeek returns 3 picks, only 1 in the pool
+    deepseek_response = '{"picks":[{"code":"600309","name":"万华化学","reason":"龙头"},{"code":"002407","name":"多氟多","reason":"六氟"},{"code":"600141","name":"兴发集团","reason":"电子特气"}]}'
+    def fake_deepseek(prompt):
+        return deepseek_response
+    db = _empty_db()
+    result = select_stocks_for_concept("六氟化钨", db, fake_deepseek)
+    assert "error" not in result
+    assert len(result["picks"]) == 3
+    codes = {p["code"] for p in result["picks"]}
+    assert codes == {"600309", "002407", "600141"}
+
+
+def test_select_rejects_fabricated_code(monkeypatch):
+    """DeepSeek makes up a code that Tencent can't quote -> rejected, retry."""
+    from sector_selector import select_stocks_for_concept
+    monkeypatch.setattr(
+        "sector_selector.fetch_concept_members_realtime",
+        lambda name: [],
+    )
+    from sector_selector import get_quote
+    # Tencent only knows 600309; DeepSeek invents 999999 and 888888
+    monkeypatch.setattr("sector_selector.get_quote", lambda code: {
+        "600309": {"code": "600309", "name": "万华化学", "total_mv": 2268, "pe": 17, "pb": 2},
+    }.get(code, {}))
+    # First attempt: DeepSeek returns 1 valid + 2 fabricated
+    # Second attempt: DeepSeek returns same (no feedback because no rejected)
+    # -> eventually error since retry won't help
+    deepseek_response = '{"picks":[{"code":"600309","name":"万华化学","reason":"龙头"},{"code":"999999","name":"虚构A","reason":"x"},{"code":"888888","name":"虚构B","reason":"y"}]}'
+    def fake_deepseek(prompt):
+        return deepseek_response
+    db = _empty_db()
+    result = select_stocks_for_concept("test", db, fake_deepseek)
+    assert "error" in result
+
+
 def test_filters_out_chinext(monkeypatch):
     """300-prefix stocks (创业板) are filtered out."""
     from sector_selector import fetch_concept_members_realtime
