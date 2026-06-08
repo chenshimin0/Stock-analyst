@@ -172,6 +172,36 @@ def test_select_rejects_fabricated_code(monkeypatch):
     assert "error" in result
 
 
+def test_select_falls_back_to_knowledge_when_pool_too_small(monkeypatch):
+    """When pool has only 1 stock, the prompt becomes confusing
+    ('pick 3 from 1'). We should fall back to pure-knowledge mode."""
+    from sector_selector import select_stocks_for_concept
+    monkeypatch.setattr(
+        "sector_selector.fetch_concept_members_realtime",
+        lambda name: [{"stock_code": "600378", "stock_name": "昊华科技"}],  # pool=1
+    )
+    from sector_selector import get_quote
+    monkeypatch.setattr("sector_selector.get_quote", lambda code: {
+        "600378": {"code": "600378", "name": "昊华科技", "total_mv": 500, "pe": 38, "pb": 2},
+        "002407": {"code": "002407", "name": "多氟多", "total_mv": 358, "pe": 75, "pb": 5},
+        "600141": {"code": "600141", "name": "兴发集团", "total_mv": 351, "pe": 24, "pb": 1},
+        "600309": {"code": "600309", "name": "万华化学", "total_mv": 2268, "pe": 17, "pb": 2},
+    }.get(code, {}))
+    # Verify the prompt sent to DeepSeek does NOT include the 1-stock table
+    captured_prompts = []
+    def fake_deepseek(prompt):
+        captured_prompts.append(prompt)
+        return '{"picks":[{"code":"600378","name":"昊华科技","reason":"六氟"},{"code":"002407","name":"多氟多","reason":"氟化工"},{"code":"600141","name":"兴发集团","reason":"电子特气"}]}'
+    db = _empty_db()
+    result = select_stocks_for_concept("六氟化钨", db, fake_deepseek)
+    assert "error" not in result
+    assert len(result["picks"]) == 3
+    # Source should be ai_knowledge (not candidates)
+    assert result["source"] == "ai_knowledge"
+    # Prompt should NOT include the 1-stock candidate table
+    assert "候选池" not in captured_prompts[0]
+
+
 def test_filters_out_chinext(monkeypatch):
     """300-prefix stocks (创业板) are filtered out."""
     from sector_selector import fetch_concept_members_realtime

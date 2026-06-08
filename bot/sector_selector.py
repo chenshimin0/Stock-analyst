@@ -337,7 +337,13 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
     MAX_RETRIES = 2
 
     candidates = build_concept_candidate_pool(concept_name, db_session)
-    source = "candidates" if candidates else "ai_knowledge"
+    # If pool has < 3 stocks, the prompt becomes confusing ("pick 3 from 1").
+    # Fall back to pure-knowledge mode so DeepSeek picks freely.
+    if len(candidates) < 3:
+        candidates = None
+        source = "ai_knowledge"
+    else:
+        source = "candidates"
 
     rejected_codes: list[str] = []
     rejected_reasons: list[str] = []
