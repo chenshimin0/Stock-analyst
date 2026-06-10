@@ -168,7 +168,7 @@ def get_kline(code: str, count: int = 120) -> list:
 # ===================================================================
 
 def get_fund_flow(code: str) -> dict:
-    """Get individual stock fund flow from EastMoney push2 API."""
+    """Get individual stock fund flow from EastMoney push2 API (latest day only)."""
     secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
     url = (
         f"https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?"
@@ -197,6 +197,102 @@ def get_fund_flow(code: str) -> dict:
     except Exception as e:
         logger.warning(f"Fund flow failed for {code}: {e}")
         return {}
+
+
+def get_fund_flow_recent(code: str, days: int = 3) -> list:
+    """Get individual stock fund flow for recent N days.
+
+    Returns list of {date, main_net, main_pct, super_large_net, large_net,
+                     medium_net, retail_net} dicts (oldest first), or [] on failure.
+    """
+    secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
+    url = (
+        f"https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?"
+        f"lmt={days}&klt=1&secid={secid}&fields1=f1,f2,f3,f7&fields2="
+        f"f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"Referer": "https://quote.eastmoney.com/"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        data = json.loads(resp.read())
+        klines = data.get("data", {}).get("klines", [])
+        if not klines:
+            return []
+        out = []
+        for line in klines[-days:]:
+            p = line.split(",")
+            if len(p) < 7:
+                continue
+            out.append({
+                "date": p[0],
+                "main_net": float(p[4]) if p[4] != "-" else 0,
+                "main_pct": float(p[5]) if p[5] != "-" else 0,
+                "super_large_net": float(p[6]) if p[6] != "-" else 0,
+                "large_net": float(p[7]) if len(p) > 7 and p[7] != "-" else 0,
+                "medium_net": float(p[8]) if len(p) > 8 and p[8] != "-" else 0,
+                "retail_net": float(p[9]) if len(p) > 9 and p[9] != "-" else 0,
+            })
+        return out
+    except Exception as e:
+        logger.warning(f"Fund flow recent failed for {code}: {e}")
+        return []
+
+
+def get_last_limit_up_date(code: str, lookback_days: int = 120) -> Optional[str]:
+    """Find the most recent limit-up date for a stock.
+
+    Returns date string YYYY-MM-DD or None if no limit-up in the period.
+    Uses Tencent K-line data (前复权) and checks if close >= limit-up price.
+    """
+    from datetime import datetime, timedelta
+    prefix = "sh" if code.startswith(("6", "9")) else "sz"
+    today = datetime.now()
+    start = (today - timedelta(days=lookback_days)).strftime("%Y-%m-%d")
+    end = today.strftime("%Y-%m-%d")
+    url = (
+        f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?"
+        f"param={prefix}{code},day,{start},{end},500,qfq"
+    )
+    try:
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        resp = urllib.request.urlopen(req, timeout=10)
+        raw = resp.read()
+        if raw[:2] == b'\x1f\x8b':
+            import gzip as _gzip
+            raw = _gzip.decompress(raw)
+        data = json.loads(raw)
+        key = f"{prefix}{code}"
+        if key not in data.get("data", {}):
+            return None
+        klines = data["data"][key].get("qfqday") or data["data"][key].get("day") or []
+        if not klines:
+            return None
+        # Sort chronologically (oldest first) and compute (today_close - prev_close) / prev_close
+        # Verified against EastMoney data — this is the canonical way (前复权 K-line 用
+        # 收盘价对比而非开/收对比，因为除权日开盘价已调整会导致失真)
+        bars = []
+        for bar in klines:
+            if len(bar) < 3:
+                continue
+            try:
+                bars.append((str(bar[0]), float(bar[1]), float(bar[2])))
+            except (ValueError, TypeError):
+                continue
+        bars.sort(key=lambda x: x[0])
+        # Walk backwards (newest first) to find the MOST RECENT limit-up day
+        for i in range(len(bars) - 1, 0, -1):
+            prev_close = bars[i-1][2]
+            today_close = bars[i][2]
+            if prev_close <= 0:
+                continue
+            change_pct = (today_close - prev_close) / prev_close * 100
+            # 主板涨停 10%，科创/创业 20%，ST 5%；统一用 ≥9.5% 简化判断
+            if change_pct >= 9.5:
+                return bars[i][0]  # already in YYYY-MM-DD format
+        return None
+    except Exception as e:
+        logger.warning(f"Last limit-up fetch failed for {code}: {e}")
+        return None
 
 
 # ===================================================================
