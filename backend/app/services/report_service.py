@@ -253,13 +253,42 @@ class ReportService:
 
     @staticmethod
     async def get_all_reports_winrates(db: Session) -> list[dict]:
-        """Return all reports with their win rate data as a flat list."""
-        from app.services.winrate_service import WinRateService
+        """Return all reports with their win rate data as a flat list.
+
+        Reads from cached WinRate table — does NOT recompute. The /winrate
+        endpoint per report is the recompute trigger. This keeps the list
+        endpoint cheap so the dashboard can poll without hanging the server.
+        """
+        from app.models import WinRate
+        from app.config import WIN_RATE_PERIODS
+        from datetime import timedelta
 
         reports = db.query(Report).order_by(Report.created_at.desc()).all()
         results = []
         for r in reports:
-            periods = await WinRateService.calculate_win_rates(db, r.id)
+            # Read cached rows for this report
+            wr_rows = db.query(WinRate).filter(WinRate.report_id == r.id).all()
+            by_period = {wr.period_days: wr for wr in wr_rows}
+            periods_out = []
+            for pd in WIN_RATE_PERIODS:
+                target_date = r.report_date + timedelta(days=pd)
+                wr = by_period.get(pd)
+                if wr and wr.is_win is not None:
+                    periods_out.append({
+                        "period_days": pd,
+                        "is_win": wr.is_win,
+                        "price_at_period": wr.price_at_period,
+                        "change_pct": wr.change_pct,
+                        "target_date": str(target_date),
+                    })
+                else:
+                    periods_out.append({
+                        "period_days": pd,
+                        "is_win": None,
+                        "price_at_period": None,
+                        "change_pct": None,
+                        "target_date": str(target_date),
+                    })
             results.append({
                 "report_id": r.id,
                 "stock_code": r.stock_code,
@@ -268,7 +297,7 @@ class ReportService:
                 "price_at_report": r.price_at_report,
                 "total_score": r.total_score,
                 "label": r.label,
-                "periods": periods,
+                "periods": periods_out,
             })
         return results
 
@@ -313,6 +342,9 @@ class ReportService:
             "financial_data_raw": report.financial_data_raw,
             "peer_comparison_raw": report.peer_comparison_raw,
             "revenue_composition_raw": report.revenue_composition_raw,
+            "fund_flow_recent": report.fund_flow_recent,
+            "last_limit_up_date": report.last_limit_up_date,
+            "last_limit_up_days_ago": report.last_limit_up_days_ago,
             "created_at": report.created_at,
             "realtime": price_data,
         }
