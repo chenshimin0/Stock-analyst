@@ -102,6 +102,24 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                            code, len(rc["by_product"]))
         except Exception as e:
             logger.warning("Revenue composition re-fetch failed for %s: %s", code, e)
+
+    # === New: 最近涨停日 (limit-up detection works reliably via Tencent K-line) ===
+    last_limit_up_date = None
+    last_limit_up_days_ago = None
+    try:
+        from astock_data import get_last_limit_up_date
+        from datetime import date as _date
+        last_limit_up_date = get_last_limit_up_date(code, lookback_days=180)
+        if last_limit_up_date:
+            try:
+                lud = _date.fromisoformat(last_limit_up_date)
+                last_limit_up_days_ago = (_date.today() - lud).days
+            except Exception:
+                last_limit_up_days_ago = None
+    except Exception as e:
+        logger.warning("Limit-up fetch failed for %s: %s", code, e)
+    # Note: fund_flow_recent is left empty because EastMoney push2 API is blocked from this server
+    fund_flow_recent = []
     try:
         p = quote.get("price", 0)
         atr = ind.get("atr", 0)
@@ -272,6 +290,61 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                     "pe_ttm": str(pe) if pe > 0 else "N/A",
                     "pb": "N/A",
                 }
+
+            # ALWAYS override critical fields with real API data (avoid AI hallucination)
+            real_pb = quote.get("pb", 0)
+            if real_pb and real_pb > 0:
+                fin_snapshot["pb"] = f"{real_pb:.2f}"
+            if not fin_snapshot.get("pe_ttm") or fin_snapshot.get("pe_ttm") == "N/A":
+                if pe > 0:
+                    fin_snapshot["pe_ttm"] = f"{pe:.1f}"
+
+            # Override company_profile with real F10 data
+            try:
+                import urllib.request, gzip
+                market = "SH" if code.startswith(("6", "9")) else "SZ"
+                f10_url = f"https://emweb.securities.eastmoney.com/PC_HSF10/CompanySurvey/CompanySurveyAjax?code={market}{code}"
+                req = urllib.request.Request(f10_url, headers={"Referer": "https://emweb.securities.eastmoney.com/"})
+                raw = urllib.request.urlopen(req, timeout=5).read()
+                if raw[:2] == b'\x1f\x8b':
+                    raw = gzip.decompress(raw)
+                import json as _json
+                f10 = _json.loads(raw)
+                jbzl = f10.get("jbzl", {}) or {}
+                fxxg = f10.get("fxxg", {}) or {}
+
+                cp = ai_data.get("company_profile", {}) or {}
+                if not cp.get("full_name") or cp.get("full_name") == "数据暂缺":
+                    cp["full_name"] = jbzl.get("gsmc", code)
+                if not cp.get("founded_listed") or "数据暂缺" in str(cp.get("founded_listed", "")):
+                    clrq = (fxxg.get("clrq") or "")[:4]
+                    ssrq = (fxxg.get("ssrq") or "")[:4]
+                    if clrq and ssrq:
+                        cp["founded_listed"] = f"成立{clrq}年 / 上市{ssrq}年"
+                if not cp.get("headquarters") or cp.get("headquarters") == "数据暂缺":
+                    if jbzl.get("bgdz"):
+                        cp["headquarters"] = jbzl["bgdz"]
+                if not cp.get("industry") or cp.get("industry") == "数据暂缺":
+                    if jbzl.get("sshy"):
+                        cp["industry"] = jbzl["sshy"]
+
+                # Auto-compute business_segments from revenue_composition_raw
+                if revenue_composition and revenue_composition.get("by_product"):
+                    bp = revenue_composition["by_product"]
+                    total = sum(p.get("revenue", 0) for p in bp)
+                    if total > 0 and (not cp.get("business_segments") or
+                                       any("数据暂缺" in str(seg.get("revenue_share", "")) for seg in cp.get("business_segments", []))):
+                        cp["business_segments"] = [
+                            {
+                                "name": p["name"],
+                                "revenue_share": f"约{p['ratio_pct']}%",
+                                "description": f"营收{p['revenue']/1e8:.1f}亿，毛利率{p.get('gross_margin_pct', 0)}%" if p.get('gross_margin_pct') is not None else f"营收{p['revenue']/1e8:.1f}亿"
+                            } for p in bp[:5]
+                        ]
+
+                ai_data["company_profile"] = cp
+            except Exception as e:
+                logger.warning(f"F10 company info fetch failed for {code}: {e}")
             financial_data = {
                 "市盈率(动态)": f"{pe:.1f}倍" if pe > 0 else "N/A",
                 "总市值(亿)": f"{quote.get('total_mv', 0):.1f}" if quote.get('total_mv', 0) > 0 else "N/A",
@@ -364,6 +437,9 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
             "financial_data_raw": financial_data_raw or {},
             "peer_comparison_raw": peer_comparison_raw or {},
             "revenue_composition_raw": revenue_composition or {},
+            "fund_flow_recent": fund_flow_recent,
+            "last_limit_up_date": last_limit_up_date,
+            "last_limit_up_days_ago": last_limit_up_days_ago,
         }
 
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
