@@ -170,17 +170,54 @@ class PriceService:
 
     @staticmethod
     async def get_historical_price(stock_code: str, target_date: str) -> Optional[float]:
+        """Fetch closing price on target_date from Tencent Finance.
+
+        target_date format: YYYYMMDD (or YYYY-MM-DD).
+        Uses Tencent's daily K-line endpoint which has worked reliably
+        from this server (akshare / EastMoney are blocked).
+        """
+        import gzip
+        import json
+        import urllib.request
+        from datetime import datetime, timedelta
         try:
-            import akshare as ak
-            df = ak.stock_zh_a_hist(
-                symbol=stock_code,
-                period="daily",
-                start_date=target_date.replace("-", ""),
-                end_date=target_date.replace("-", ""),
-                adjust=""
+            target_str = target_date.replace("-", "")
+            target_dt = datetime.strptime(target_str, "%Y%m%d").date()
+        except ValueError:
+            return None
+        try:
+            # Tencent daily K-line URL: 前复权
+            prefix = "sh" if stock_code.startswith(("6", "9")) else "sz"
+            start = (target_dt - timedelta(days=15)).strftime("%Y-%m-%d")
+            end = (target_dt + timedelta(days=2)).strftime("%Y-%m-%d")
+            url = (
+                f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?"
+                f"param={prefix}{stock_code},day,{start},{end},60,qfq"
             )
-            if df is not None and not df.empty:
-                return float(df.iloc[-1]["收盘"])
+            req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+            resp = urllib.request.urlopen(req, timeout=10)
+            raw = resp.read()
+            if raw[:2] == b"\x1f\x8b":
+                raw = gzip.decompress(raw)
+            data = json.loads(raw)
+            key = f"{prefix}{stock_code}"
+            klines = (
+                data.get("data", {}).get(key, {}).get("qfqday")
+                or data.get("data", {}).get(key, {}).get("day")
+                or []
+            )
+            target_str_dash = target_dt.strftime("%Y-%m-%d")
+            for bar in klines:
+                if len(bar) < 3:
+                    continue
+                bar_date = str(bar[0])
+                if len(bar_date) >= 10:
+                    bar_date = bar_date[:10]
+                if bar_date == target_str_dash:
+                    try:
+                        return float(bar[2])  # close price
+                    except (ValueError, TypeError):
+                        continue
+            return None
         except Exception:
-            pass
-        return None
+            return None

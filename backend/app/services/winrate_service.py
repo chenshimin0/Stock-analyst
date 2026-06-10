@@ -46,26 +46,40 @@ class WinRateService:
                 })
                 continue
 
-            # Try price_snapshots first
+            # Try price_snapshots first, but only if the snapshot date is
+            # close enough to target_date (within 3 days). Otherwise the
+            # snapshot is stale (e.g. it's the 6/1 price when target is
+            # 6/9) and we must fetch fresh data — otherwise 7d/15d/30d
+            # would all return the same value.
             snapshot = db.query(PriceSnapshot).filter(
                 PriceSnapshot.report_id == report_id,
                 PriceSnapshot.date <= target_date,
+                PriceSnapshot.date >= target_date - timedelta(days=3),
             ).order_by(PriceSnapshot.date.desc()).first()
 
             price_at_period = snapshot.price if snapshot else None
 
-            # Fall back to akshare
+            # Fall back to live K-line / akshare
             if price_at_period is None:
                 price_at_period = await PriceService.get_historical_price(
                     report.stock_code,
                     target_date.strftime("%Y%m%d"),
                 )
                 if price_at_period is not None:
-                    db.add(PriceSnapshot(
-                        report_id=report_id,
-                        date=target_date,
-                        price=price_at_period,
-                    ))
+                    # Upsert: replace any older snapshots for this report
+                    # with this fresh one keyed on target_date.
+                    old = db.query(PriceSnapshot).filter(
+                        PriceSnapshot.report_id == report_id,
+                        PriceSnapshot.date == target_date,
+                    ).first()
+                    if old:
+                        old.price = price_at_period
+                    else:
+                        db.add(PriceSnapshot(
+                            report_id=report_id,
+                            date=target_date,
+                            price=price_at_period,
+                        ))
                     db.commit()
 
             if price_at_period is not None and report.price_at_report > 0:
