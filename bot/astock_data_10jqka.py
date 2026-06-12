@@ -612,6 +612,50 @@ def get_concept_boards_10jqka(code: str) -> list:
         return []
 
 
+def get_industry_business(code: str, max_business_chars: int = 200) -> dict:
+    """Get industry classification and business summary from 10jqka F10 company page.
+
+    Requires login cookies in 10jqka_cookies.enc. Returns dict with keys:
+      - industry: str (e.g. '电力设备 — 电网设备') or None
+      - business_summary: str (truncated to max_business_chars) or None
+
+    Returns {} on any failure. Fails silently — the strategy picker treats
+    missing industry/business as acceptable.
+    """
+    out = {"industry": None, "business_summary": None}
+    if not code or len(code) != 6:
+        return out
+    cookies = _load_10jqka_cookies()
+    if not cookies.get("sess_tk"):
+        logger.debug("No 10jqka session cookie, skipping industry/business")
+        return out
+    try:
+        url = f"https://basic.10jqka.com.cn/{code}/company.html"
+        raw = _http_get(url, timeout=10, max_retries=1,
+                        extra_headers={"Cookie": "; ".join(f"{k}={v}" for k, v in cookies.items()),
+                                       "User-Agent": "Mozilla/5.0"})
+        text = raw.decode("gbk", errors="replace")
+        import re
+        # Industry: <strong>所属申万行业：</strong><span>X — Y</span>
+        m = re.search(r"所属申万行业[:：]?\s*</[^>]+>\s*<span[^>]*>([^<]+)</span>", text)
+        if m:
+            out["industry"] = m.group(1).strip()
+        # Business: 主营业务：<stuff>...</p|div|span
+        m = re.search(
+            r"主营业务[:：]?\s*</[^>]+>\s*(?:<[^>]+>)*\s*(.{0,500}?)</(?:p|div|td|span|dt)",
+            text, re.DOTALL,
+        )
+        if m:
+            biz = re.sub(r"<[^>]+>", " ", m.group(1))  # strip tags
+            biz = re.sub(r"\s+", " ", biz).strip()
+            if biz:
+                out["business_summary"] = biz[:max_business_chars]
+        return out
+    except Exception as e:
+        logger.warning(f"get_industry_business failed for {code}: {e}")
+        return out
+
+
 # ===================================================================
 # 8. Utility: enrich existing quote dict with 10jqka data
 # ===================================================================
