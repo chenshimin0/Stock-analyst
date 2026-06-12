@@ -138,3 +138,65 @@ class AggregateWinRate(BaseModel):
     total_count: int
     win_rate: float
     avg_change_pct: float
+
+
+# =========================================================================
+# Strategy picks (auto-selected by iwencai)
+# =========================================================================
+
+class StrategyStockMetric(BaseModel):
+    id: int
+    stock_code: str
+    stock_name: str
+    industry: Optional[str] = None
+    business_summary: Optional[str] = None
+    selection_reason: Optional[str] = None
+    t0_date: date
+    t0_price: Optional[float] = None
+    t3_date: Optional[date] = None
+    t3_price: Optional[float] = None
+    t3_pct: Optional[float] = None
+    t7_date: Optional[date] = None
+    t7_price: Optional[float] = None
+    t7_pct: Optional[float] = None
+    t15_date: Optional[date] = None
+    t15_price: Optional[float] = None
+    t15_pct: Optional[float] = None
+    t30_date: Optional[date] = None
+    t30_price: Optional[float] = None
+    t30_pct: Optional[float] = None
+
+    model_config = {"from_attributes": True}
+
+
+class StrategyPickListItem(BaseModel):
+    id: int
+    strategy_name: str
+    status: str
+    hit_count: int
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    avg_t3_pct: Optional[float] = None
+    avg_t7_pct: Optional[float] = None
+    avg_t15_pct: Optional[float] = None
+    avg_t30_pct: Optional[float] = None
+
+    model_config = {"from_attributes": True}
+
+
+class StrategyPickDetail(BaseModel):
+    id: int
+    strategy_name: str
+    query_text: str
+    status: str
+    hit_count: int
+    created_at: datetime
+    completed_at: Optional[datetime] = None
+    archived_at: Optional[datetime] = None
+    avg_t3_pct: Optional[float] = None
+    avg_t7_pct: Optional[float] = None
+    avg_t15_pct: Optional[float] = None
+    avg_t30_pct: Optional[float] = None
+    stocks: list[StrategyStockMetric]
+
+    model_config = {"from_attributes": True}
