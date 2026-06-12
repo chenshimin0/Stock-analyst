@@ -124,12 +124,17 @@ async def get_report(
     format: str = Query("json", alias="format"),
     db: Session = Depends(get_db),
 ):
-    # Try numeric ID first, then slug lookup
+    # Try numeric ID first, then slug lookup, then stock_code fallback
     data = None
     if report_id.isdigit():
         data = await ReportService.get_report_with_realtime(db, int(report_id))
     if not data:
-        report = db.query(Report).filter(Report.slug == report_id).order_by(Report.created_at.desc()).first()
+        report = (
+            db.query(Report)
+            .filter((Report.slug == report_id) | (Report.stock_code == report_id))
+            .order_by(Report.created_at.desc())
+            .first()
+        )
         if report:
             data = await ReportService.get_report_with_realtime(db, report.id)
     if not data:
@@ -151,12 +156,16 @@ def create_report(data: ReportCreate, db: Session = Depends(get_db)):
 
 @router.delete("/{report_id}")
 def delete_report(report_id: str, db: Session = Depends(get_db)):
-    """Delete by numeric id or slug (e.g. 'HHKJ' or '600378')."""
+    """Delete by numeric id, slug (e.g. 'HHKJ'), or stock code (e.g. '600378')."""
     q = db.query(Report)
     if report_id.isdigit():
         report = q.filter(Report.id == int(report_id)).first()
     else:
-        report = q.filter(Report.slug == report_id).order_by(Report.created_at.desc()).first()
+        report = (
+            q.filter((Report.slug == report_id) | (Report.stock_code == report_id))
+            .order_by(Report.created_at.desc())
+            .first()
+        )
     if not report:
         return {"detail": "Report not found"}, 404
     rid = report.id

@@ -9,7 +9,16 @@ from app.services.price_service import PriceService
 from pypinyin import pinyin, Style
 
 
-def _make_slug(name: str) -> str:
+def _make_slug(stock_code: str, name: str = "") -> str:
+    """Generate a URL-friendly slug.
+
+    Uses the stock code as the primary key (e.g. '002498') because
+    pinyin initials collide (汉缆股份/海亮股份 both -> 'HLGF').
+    Falls back to pinyin only if stock_code is missing.
+    """
+    if stock_code:
+        return stock_code.lower()
+    # Fallback: pinyin initials
     initials = pinyin(name, style=Style.FIRST_LETTER)
     return ''.join([i[0].upper() for i in initials])
 
@@ -72,7 +81,7 @@ class ReportService:
         if existing:
             existing.report_date = data.report_date
             existing.stock_name = data.stock_name
-            existing.slug = _make_slug(data.stock_name)
+            existing.slug = _make_slug(data.stock_code, data.stock_name)
             existing.price_at_report = data.price_at_report
             existing.momentum_score = data.momentum_score
             existing.revenue_score = data.revenue_score
@@ -116,7 +125,7 @@ class ReportService:
         report = Report(
             stock_code=data.stock_code,
             stock_name=data.stock_name,
-            slug=_make_slug(data.stock_name),
+            slug=_make_slug(data.stock_code, data.stock_name),
             report_date=data.report_date,
             price_at_report=data.price_at_report,
             momentum_score=data.momentum_score,
