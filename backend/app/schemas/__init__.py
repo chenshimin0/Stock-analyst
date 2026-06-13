@@ -171,7 +171,7 @@ class StrategyStockMetric(BaseModel):
 
 class StrategyPickListItem(BaseModel):
     id: int
-    strategy_name: str
+    strategy_id: int
     status: str
     hit_count: int
     created_at: datetime
@@ -186,8 +186,7 @@ class StrategyPickListItem(BaseModel):
 
 class StrategyPickDetail(BaseModel):
     id: int
-    strategy_name: str
-    query_text: str
+    strategy_id: int
     status: str
     hit_count: int
     created_at: datetime
@@ -198,5 +197,39 @@ class StrategyPickDetail(BaseModel):
     avg_t15_pct: Optional[float] = None
     avg_t30_pct: Optional[float] = None
     stocks: list[StrategyStockMetric]
+
+    model_config = {"from_attributes": True}
+
+
+# =========================================================================
+# Strategy (definition) — multi-strategy support
+# =========================================================================
+
+class StrategyOut(BaseModel):
+    id: int
+    name: str
+    query_text: str
+    schedule_cron: str
+    enabled: bool
+    created_at: datetime
+    updated_at: datetime
+    total_picks: int = 0
+    last_pick_at: Optional[datetime] = None
+
+    model_config = {"from_attributes": True}
+
+
+class StrategyCreate(BaseModel):
+    name: str
+    query_text: str
+    schedule_cron: str = "14:30"
+    enabled: bool = True
+
+
+class StrategyUpdate(BaseModel):
+    name: Optional[str] = None
+    query_text: Optional[str] = None
+    schedule_cron: Optional[str] = None
+    enabled: Optional[bool] = None
 
     model_config = {"from_attributes": True}

@@ -22,17 +22,20 @@ def _avg(stocks, attr: str) -> Optional[float]:
 @router.get("", response_model=list[StrategyPickListItem])
 def list_strategy_picks(
     status: Optional[str] = Query(None, pattern="^(in_progress|completed|archived)$"),
+    strategy_id: Optional[int] = Query(None, ge=1),
     db: Session = Depends(get_db),
 ):
-    """List strategy picks. Filter by status (in_progress|completed|archived)."""
+    """List strategy picks. Filter by status and/or strategy_id."""
     q = db.query(StrategyPick)
     if status:
         q = q.filter(StrategyPick.status == status)
+    if strategy_id is not None:
+        q = q.filter(StrategyPick.strategy_id == strategy_id)
     picks = q.order_by(StrategyPick.created_at.desc()).all()
     return [
         StrategyPickListItem(
             id=p.id,
-            strategy_name=p.strategy_name,
+            strategy_id=p.strategy_id,
             status=p.status,
             hit_count=p.hit_count,
             created_at=p.created_at,
@@ -53,8 +56,7 @@ def get_strategy_pick(pick_id: int, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Strategy pick not found")
     return StrategyPickDetail(
         id=p.id,
-        strategy_name=p.strategy_name,
-        query_text=p.query_text,
+        strategy_id=p.strategy_id,
         status=p.status,
         hit_count=p.hit_count,
         created_at=p.created_at,

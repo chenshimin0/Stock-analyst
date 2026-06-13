@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { listStrategyPicks } from '../api/strategy.js';
+import { listStrategies } from '../api/strategies.js';
 
 const TABS = [
   { key: 'active', label: '进行中', statuses: ['in_progress', 'completed'] },
@@ -10,18 +11,28 @@ const TABS = [
 export default function StrategyList() {
   const [tab, setTab] = useState('active');
   const [picks, setPicks] = useState([]);
+  const [strategies, setStrategies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
+  const [params] = useSearchParams();
+  const filterStrategyId = params.get('strategy_id') ? Number(params.get('strategy_id')) : null;
 
   useEffect(() => {
     setLoading(true);
     setErr(null);
     const statuses = TABS.find(t => t.key === tab).statuses;
-    Promise.all(statuses.map(s => listStrategyPicks(s).catch(() => [])))
-      .then(arrs => setPicks(arrs.flat()))
-      .catch(e => setErr(String(e)))
-      .finally(() => setLoading(false));
-  }, [tab]);
+    Promise.all([
+      ...statuses.map(s => listStrategyPicks(s, filterStrategyId).catch(() => [])),
+      listStrategies().catch(() => []),
+    ]).then(([picksArr, strats]) => {
+      setPicks(picksArr.flat());
+      setStrategies(strats);
+    })
+    .catch(e => setErr(String(e)))
+    .finally(() => setLoading(false));
+  }, [tab, filterStrategyId]);
+
+  const strategyName = (id) => strategies.find(s => s.id === id)?.name || `#${id}`;
 
   return (
     <div style={{ padding: 24 }}>
@@ -77,7 +88,7 @@ export default function StrategyList() {
                 <td style={td}>
                   <Link to={`/strategy/${p.id}`}>#{p.id}</Link>
                 </td>
-                <td style={td}>{p.strategy_name}</td>
+                <td style={td}>{strategyName(p.strategy_id)}</td>
                 <td style={td}><StatusBadge status={p.status} /></td>
                 <td style={td}>{p.hit_count}</td>
                 <td style={td}>{new Date(p.created_at).toLocaleString()}</td>

@@ -6,14 +6,14 @@ from pathlib import Path
 from app.config import CORS_ORIGINS
 from app.database import engine, Base
 from app.models import Report, PriceSnapshot, WinRate, SectorPick, SectorPickStock, SectorMemberCache
-from app.models import StrategyPick, StrategyPickStock
+from app.models import StrategyPick, StrategyPickStock, Strategy
 from app.models.sector_pick import Base as SectorPickBase
-from app.models.strategy_pick import Base as StrategyPickBase
-from app.routers import reports, stocks, sector, sector_picks, strategy
+from app.models.strategy import Base as StrategyBase
+from app.routers import reports, stocks, sector, sector_picks, strategy, strategies
 
 Base.metadata.create_all(bind=engine)
 SectorPickBase.metadata.create_all(bind=engine)
-StrategyPickBase.metadata.create_all(bind=engine)
+StrategyBase.metadata.create_all(bind=engine)
 
 # Migration: add missing columns if not exists (SQLite)
 try:
@@ -43,6 +43,7 @@ app.include_router(stocks.router, prefix="/api")
 app.include_router(sector.router, prefix="/api")
 app.include_router(sector_picks.router, prefix="/api")
 app.include_router(strategy.router, prefix="/api")
+app.include_router(strategies.router, prefix="/api")
 
 # Serve frontend in production
 frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"
