@@ -16,6 +16,20 @@ a { text-decoration: none; color: inherit; }
 .sidebar .logo { font-size: 18px; font-weight: 700; color: #f0f6fc; margin-bottom: 24px; padding: 0 12px; }
 .sidebar a { padding: 10px 12px; border-radius: 8px; color: var(--text-secondary); font-size: 14px; transition: all 0.15s; }
 .sidebar a:hover, .sidebar a.active { background: rgba(59,130,246,0.1); color: var(--accent); }
+
+/* Submenu (collapsible nav group) */
+.submenu { display: flex; flex-direction: column; gap: 4px; }
+.submenu-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 12px; border-radius: 8px; color: var(--text-secondary);
+  font-size: 14px; cursor: pointer; user-select: none;
+  transition: all 0.15s;
+}
+.submenu-header:hover { background: rgba(59,130,246,0.06); color: var(--text-primary); }
+.submenu-header.active { background: rgba(59,130,246,0.1); color: var(--accent); font-weight: 600; }
+.submenu-arrow { font-size: 10px; color: var(--text-secondary); }
+.submenu-children { display: flex; flex-direction: column; gap: 4px; padding-left: 12px; border-left: 1px solid var(--border); margin-left: 12px; }
+.submenu-children a { padding: 6px 10px; font-size: 13px; }
 .main-content { flex: 1; padding: 32px; overflow-y: auto; }
 
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px; }
