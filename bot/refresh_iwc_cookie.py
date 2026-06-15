@@ -51,6 +51,20 @@ def main():
     COOKIE_FILE.write_text(raw + "\n", encoding="utf-8")
     os.chmod(COOKIE_FILE, 0o600)
     os.utime(COOKIE_FILE, (time.time(), time.time()))
+    # If running via sudo, hand the file to the service user so the
+    # backend (uvicorn) can read it. Detect by effective uid.
+    if os.geteuid() == 0 and os.environ.get("SUDO_USER"):
+        target_uid = None
+        target_gid = None
+        try:
+            import pwd
+            pw = pwd.getpwnam(os.environ["SUDO_USER"])
+            target_uid, target_gid = pw.pw_uid, pw.pw_gid
+        except KeyError:
+            pass
+        if target_uid is not None:
+            os.chown(COOKIE_FILE, target_uid, target_gid)
+            print(f"  chown {os.environ['SUDO_USER']}")
 
     print()
     print(f"✓ Saved {len(raw)} chars to {COOKIE_FILE} (mode 0o600)")
