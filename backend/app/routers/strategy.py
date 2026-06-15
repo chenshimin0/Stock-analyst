@@ -113,3 +113,14 @@ def archive_strategy_pick(pick_id: int, db: Session = Depends(get_db)):
     p.archived_at = datetime.utcnow()
     db.commit()
     return {"detail": "archived", "id": pick_id}
+
+
+@router.delete("/{pick_id}")
+def delete_strategy_pick(pick_id: int, db: Session = Depends(get_db)):
+    """Permanently delete a pick and its stock rows (cascade)."""
+    p = db.query(StrategyPick).filter(StrategyPick.id == pick_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Strategy pick not found")
+    db.delete(p)
+    db.commit()
+    return {"detail": "deleted", "id": pick_id}

@@ -17,3 +17,8 @@ export async function archiveStrategyPick(id) {
   const res = await client.post(`/strategy-picks/${id}/archive`);
   return res.data;
 }
+
+export async function deleteStrategyPick(id) {
+  const res = await client.delete(`/strategy-picks/${id}`);
+  return res.data;
+}

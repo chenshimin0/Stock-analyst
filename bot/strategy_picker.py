@@ -9,7 +9,7 @@ Returns dict {ok, batch_id, hit_count, errors, message}.
 """
 import logging
 import sys
-from datetime import date as _date
+from datetime import datetime, date as _date
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -21,6 +21,17 @@ from app.models import Strategy, StrategyPick, StrategyPickStock  # noqa: E402
 from iwc_client import IwcLoginError, IwcQueryError, query  # noqa: E402
 
 logger = logging.getLogger("strategy_picker")
+
+
+def _get_stock_name(row: dict) -> str:
+    """iwc returns the stock name under various keys depending on
+    query type. Try them in order of specificity.
+    """
+    for key in ("股票简称", "name", "stock_name", "简称"):
+        v = row.get(key)
+        if v and str(v).strip():
+            return str(v).strip()
+    return ""
 
 
 def _get_realtime_price(code: str) -> float | None:
@@ -46,6 +57,7 @@ def _get_industry_business(code: str) -> dict:
 def _pick_for(strategy: Strategy, db) -> dict:
     """One strategy: query, build batch, return result dict. Caller commits."""
     today = _date.today()
+    now = datetime.utcnow()
     out = {
         "strategy_id": strategy.id,
         "strategy_name": strategy.name,
@@ -74,39 +86,59 @@ def _pick_for(strategy: Strategy, db) -> dict:
         logger.info(f"[{strategy.name}] {out['message']}")
         return out
 
+    # Build stock rows first so we can set the *real* hit_count
+    stock_rows = []
+    skipped = 0
+    for r in rows:
+        code = (r.get("code") or "").strip()
+        name = _get_stock_name(r)
+        if not code or not name:
+            logger.warning(f"[{strategy.name}] skipping row missing code/name: {r}")
+            skipped += 1
+            continue
+        stock_rows.append({
+            "code": code,
+            "name": name,
+            "t0_price": _get_realtime_price(code),
+            "ind_biz": _get_industry_business(code),
+        })
+
+    if not stock_rows:
+        out["ok"] = True
+        out["message"] = f"iwencai 返回 {len(rows)} 条但全部缺少 code/name，跳过"
+        logger.warning(f"[{strategy.name}] {out['message']}")
+        return out
+
     pick = StrategyPick(
         strategy_id=strategy.id,
         status="in_progress",
-        hit_count=len(rows),
-        created_at=today,
+        hit_count=len(stock_rows),
+        created_at=now,
     )
     db.add(pick)
     db.flush()
 
-    for r in rows:
-        code = (r.get("code") or "").strip()
-        name = (r.get("name") or r.get("stock_name") or "").strip()
-        if not code or not name:
-            continue
-        t0_price = _get_realtime_price(code)
-        ind_biz = _get_industry_business(code)
+    for s in stock_rows:
         db.add(StrategyPickStock(
             strategy_pick_id=pick.id,
-            stock_code=code,
-            stock_name=name,
-            industry=ind_biz.get("industry"),
-            business_summary=ind_biz.get("business_summary"),
+            stock_code=s["code"],
+            stock_name=s["name"],
+            industry=s["ind_biz"].get("industry"),
+            business_summary=s["ind_biz"].get("business_summary"),
             selection_reason=None,
             t0_date=today,
-            t0_price=t0_price,
+            t0_price=s["t0_price"],
         ))
     db.commit()
 
     out["ok"] = True
     out["batch_id"] = pick.id
-    out["hit_count"] = len(rows)
-    out["message"] = f"已创建 batch {pick.id}，命中 {len(rows)} 只"
-    logger.info(f"[{strategy.name}] {out['message']}")
+    out["hit_count"] = len(stock_rows)
+    msg = f"已创建 batch {pick.id}，命中 {len(stock_rows)} 只"
+    if skipped:
+        msg += f"（跳过 {skipped} 条缺字段）"
+    out["message"] = msg
+    logger.info(f"[{strategy.name}] {msg}")
     return out
 
 

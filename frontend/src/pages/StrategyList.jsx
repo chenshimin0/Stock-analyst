@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { listStrategyPicks } from '../api/strategy.js';
+import { listStrategyPicks, deleteStrategyPick } from '../api/strategy.js';
 import { listStrategies } from '../api/strategies.js';
 
 const TABS = [
@@ -70,7 +70,12 @@ export default function StrategyList() {
       {!loading && picks.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
           {picks.map(p => (
-            <PickCard key={p.id} pick={p} strategyName={strategyName} />
+            <PickCard
+              key={p.id}
+              pick={p}
+              strategyName={strategyName}
+              onDeleted={(id) => setPicks(prev => prev.filter(x => x.id !== id))}
+            />
           ))}
         </div>
       )}
@@ -78,13 +83,25 @@ export default function StrategyList() {
   );
 }
 
-function PickCard({ pick, strategyName }) {
+function PickCard({ pick, strategyName, onDeleted }) {
   const preview = pick.stocks_preview || [];
   const hidden = pick.hit_count - preview.length;
+
+  const handleDelete = async () => {
+    if (!confirm(`确认永久删除批次 #${pick.id}？\n该批次 ${pick.hit_count} 只股票的 T+N 追踪数据将全部丢失。`)) return;
+    try {
+      await deleteStrategyPick(pick.id);
+      onDeleted(pick.id);
+    } catch (e) {
+      alert('删除失败：' + e.message);
+    }
+  };
+
   return (
     <div style={{
       background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8,
       padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+      position: 'relative',
     }}>
       {/* header row */}
       <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
@@ -101,6 +118,17 @@ function PickCard({ pick, strategyName }) {
         </span>
         <div style={{ flex: 1 }} />
         <AvgCells pick={pick} />
+        <button
+          onClick={handleDelete}
+          title="永久删除该批次"
+          style={{
+            padding: '4px 10px', background: '#fff',
+            border: '1px solid #d32f2f', color: '#d32f2f',
+            borderRadius: 4, cursor: 'pointer', fontSize: 12, fontWeight: 600,
+          }}
+        >
+          🗑️ 删除
+        </button>
       </div>
 
       {/* query text */}

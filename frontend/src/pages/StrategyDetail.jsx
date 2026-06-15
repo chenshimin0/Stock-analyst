@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getStrategyPick, archiveStrategyPick } from '../api/strategy.js';
+import { getStrategyPick, archiveStrategyPick, deleteStrategyPick } from '../api/strategy.js';
 
 export default function StrategyDetail() {
   const { id } = useParams();
@@ -21,6 +21,16 @@ export default function StrategyDetail() {
     if (!confirm(`确认归档批次 #${pick.id}？`)) return;
     await archiveStrategyPick(id);
     navigate('/strategy');
+  };
+
+  const handleDelete = async () => {
+    if (!confirm(`确认永久删除批次 #${pick.id}？\n该批次 ${pick.hit_count} 只股票的 T+N 追踪数据将全部丢失，无法恢复。`)) return;
+    try {
+      await deleteStrategyPick(id);
+      navigate('/strategy');
+    } catch (e) {
+      alert('删除失败：' + e.message);
+    }
   };
 
   if (loading) return <div style={{ padding: 24 }}>加载中…</div>;
@@ -89,23 +99,30 @@ export default function StrategyDetail() {
         <div style={{ color: '#888' }}>该批次没有股票记录</div>
       )}
 
-      {pick.status !== 'archived' && (
-        <div style={{ marginTop: 24 }}>
+      <div style={{ marginTop: 24, display: 'flex', gap: 10 }}>
+        {pick.status !== 'archived' && (
           <button
             onClick={handleArchive}
             style={{
-              padding: '8px 18px',
-              background: '#fff',
-              border: '1px solid #d32f2f',
-              color: '#d32f2f',
-              borderRadius: 4,
-              cursor: 'pointer',
+              padding: '8px 18px', background: '#fff',
+              border: '1px solid #d32f2f', color: '#d32f2f',
+              borderRadius: 4, cursor: 'pointer',
             }}
           >
             归档该批次
           </button>
-        </div>
-      )}
+        )}
+        <button
+          onClick={handleDelete}
+          style={{
+            padding: '8px 18px', background: '#fff',
+            border: '1px solid #888', color: '#333',
+            borderRadius: 4, cursor: 'pointer', fontWeight: 600,
+          }}
+        >
+          🗑️ 永久删除
+        </button>
+      </div>
     </div>
   );
 }
