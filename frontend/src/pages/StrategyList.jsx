@@ -32,7 +32,7 @@ export default function StrategyList() {
     .finally(() => setLoading(false));
   }, [tab, filterStrategyId]);
 
-  const strategyName = (id) => strategies.find(s => s.id === id)?.name || `#${id}`;
+  const strategyName = (id, name) => name || strategies.find(s => s.id === id)?.name || `#${id}`;
 
   return (
     <div style={{ padding: 24 }}>
@@ -68,14 +68,61 @@ export default function StrategyList() {
       )}
 
       {!loading && picks.length > 0 && (
-        <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+          {picks.map(p => (
+            <PickCard key={p.id} pick={p} strategyName={strategyName} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PickCard({ pick, strategyName }) {
+  const preview = pick.stocks_preview || [];
+  const hidden = pick.hit_count - preview.length;
+  return (
+    <div style={{
+      background: '#fff', border: '1px solid #e0e0e0', borderRadius: 8,
+      padding: 16, boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+    }}>
+      {/* header row */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+        <Link to={`/strategy/${pick.id}`} style={{ fontSize: 16, fontWeight: 700, color: '#1565c0' }}>
+          #{pick.id}
+        </Link>
+        <span style={{ fontSize: 14, color: '#333' }}>{strategyName(pick.strategy_id, pick.strategy_name)}</span>
+        <StatusBadge status={pick.status} />
+        <span style={{ fontSize: 12, color: '#888' }}>
+          {new Date(pick.created_at).toLocaleString()}
+        </span>
+        <span style={{ fontSize: 12, color: '#666' }}>
+          命中 <b style={{ color: '#1565c0' }}>{pick.hit_count}</b> 只
+        </span>
+        <div style={{ flex: 1 }} />
+        <AvgCells pick={pick} />
+      </div>
+
+      {/* query text */}
+      {pick.query_text && (
+        <div style={{
+          fontFamily: 'monospace', fontSize: 11, color: '#666',
+          background: '#f7f7f7', padding: '6px 10px', borderRadius: 4,
+          marginBottom: 10, wordBreak: 'break-all', lineHeight: 1.5,
+        }}>
+          {pick.query_text}
+        </div>
+      )}
+
+      {/* stock preview table */}
+      {preview.length > 0 ? (
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
           <thead>
-            <tr style={{ background: '#37474f', color: '#fff' }}>
-              <th style={th}>批次 ID</th>
-              <th style={th}>策略</th>
-              <th style={th}>状态</th>
-              <th style={th}>命中数</th>
-              <th style={th}>创建时间</th>
+            <tr style={{ background: '#eceff1', color: '#37474f' }}>
+              <th style={th}>代码</th>
+              <th style={th}>名称</th>
+              <th style={th}>行业</th>
+              <th style={th}>选入价</th>
               <th style={th}>T+3</th>
               <th style={th}>T+7</th>
               <th style={th}>T+15</th>
@@ -83,24 +130,49 @@ export default function StrategyList() {
             </tr>
           </thead>
           <tbody>
-            {picks.map(p => (
-              <tr key={p.id} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={td}>
-                  <Link to={`/strategy/${p.id}`}>#{p.id}</Link>
-                </td>
-                <td style={td}>{strategyName(p.strategy_id)}</td>
-                <td style={td}><StatusBadge status={p.status} /></td>
-                <td style={td}>{p.hit_count}</td>
-                <td style={td}>{new Date(p.created_at).toLocaleString()}</td>
-                <td style={td}><Pct value={p.avg_t3_pct} /></td>
-                <td style={td}><Pct value={p.avg_t7_pct} /></td>
-                <td style={td}><Pct value={p.avg_t15_pct} /></td>
-                <td style={td}><Pct value={p.avg_t30_pct} /></td>
+            {preview.map(s => (
+              <tr key={s.id} style={{ borderBottom: '1px solid #f0f0f0' }}>
+                <td style={td}><code style={{ fontSize: 12 }}>{s.stock_code}</code></td>
+                <td style={{ ...td, fontWeight: 600 }}>{s.stock_name}</td>
+                <td style={td}><span style={{ color: s.industry ? '#555' : '#bbb', fontSize: 12 }}>{s.industry || '—'}</span></td>
+                <td style={td}>{s.t0_price != null ? s.t0_price.toFixed(2) : '—'}</td>
+                <td style={td}><Pct value={s.t3_pct} /></td>
+                <td style={td}><Pct value={s.t7_pct} /></td>
+                <td style={td}><Pct value={s.t15_pct} /></td>
+                <td style={td}><Pct value={s.t30_pct} /></td>
               </tr>
             ))}
           </tbody>
         </table>
+      ) : (
+        <div style={{ color: '#999', fontSize: 12, padding: '6px 0' }}>该批次没有股票记录</div>
       )}
+
+      {hidden > 0 && (
+        <div style={{ marginTop: 6, fontSize: 12, color: '#1565c0' }}>
+          还有 {hidden} 只未显示 — <Link to={`/strategy/${pick.id}`}>查看全部</Link>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AvgCells({ pick }) {
+  const cells = [
+    { label: 'T+3', v: pick.avg_t3_pct },
+    { label: 'T+7', v: pick.avg_t7_pct },
+    { label: 'T+15', v: pick.avg_t15_pct },
+    { label: 'T+30', v: pick.avg_t30_pct },
+  ];
+  return (
+    <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+      <span style={{ fontSize: 11, color: '#888' }}>均值</span>
+      {cells.map(c => (
+        <div key={c.label} style={{ textAlign: 'center' }}>
+          <div style={{ fontSize: 10, color: '#999' }}>{c.label}</div>
+          <Pct value={c.v} small />
+        </div>
+      ))}
     </div>
   );
 }
@@ -114,24 +186,25 @@ function StatusBadge({ status }) {
   const cfg = map[status] || { label: status, bg: '#eee', color: '#333' };
   return (
     <span style={{
-      padding: '2px 8px',
-      background: cfg.bg,
-      color: cfg.color,
-      borderRadius: 4,
-      fontSize: 12,
+      padding: '2px 8px', background: cfg.bg, color: cfg.color,
+      borderRadius: 4, fontSize: 12,
     }}>
       {cfg.label}
     </span>
   );
 }
 
-function Pct({ value }) {
-  if (value == null) return <span style={{ color: '#999' }}>—</span>;
+function Pct({ value, small }) {
+  if (value == null) return <span style={{ color: '#bbb', fontSize: small ? 12 : 13 }}>—</span>;
   const isPos = value > 0;
   const isNeg = value < 0;
-  const color = isPos ? '#d32f2f' : isNeg ? '#2e7d32' : '#333';
-  return <span style={{ color, fontWeight: 600 }}>{value > 0 ? '+' : ''}{value.toFixed(2)}%</span>;
+  const color = isPos ? '#d32f2f' : isNeg ? '#2e7d32' : '#666';
+  return (
+    <span style={{ color, fontWeight: 600, fontSize: small ? 12 : 13 }}>
+      {value > 0 ? '+' : ''}{value.toFixed(2)}%
+    </span>
+  );
 }
 
-const th = { padding: '8px 12px', textAlign: 'left', fontSize: 13, color: '#fff' };
-const td = { padding: '8px 12px', fontSize: 14 };
+const th = { padding: '6px 10px', textAlign: 'left', fontSize: 12, fontWeight: 600 };
+const td = { padding: '6px 10px', fontSize: 13 };

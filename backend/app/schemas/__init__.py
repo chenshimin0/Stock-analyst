@@ -176,6 +176,9 @@ class StrategyPickListItem(BaseModel):
     hit_count: int
     created_at: datetime
     completed_at: Optional[datetime] = None
+    query_text: str = ""
+    strategy_name: str = ""
+    stocks_preview: list[StrategyStockMetric] = []
     avg_t3_pct: Optional[float] = None
     avg_t7_pct: Optional[float] = None
     avg_t15_pct: Optional[float] = None
@@ -192,6 +195,8 @@ class StrategyPickDetail(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime] = None
     archived_at: Optional[datetime] = None
+    query_text: str = ""
+    strategy_name: str = ""
     avg_t3_pct: Optional[float] = None
     avg_t7_pct: Optional[float] = None
     avg_t15_pct: Optional[float] = None

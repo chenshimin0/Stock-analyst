@@ -5,14 +5,13 @@ Loads encrypted cookies from 10jqka_cookies.enc, sends the verified
 POST to get-robot-data, parses the structured stock list out of the
 xuangu_tableV1 component.
 
-NOTE on auto-login:
-    The 10jqka upass login flow uses chameleon.js (anti-bot SDK with
-    fingerprinting + captcha). Pure server-side automated login is not
-    feasible from this server IP. Cookie refresh is a manual step:
+NOTE on cookie refresh:
+    Querying iwencai does NOT require an account login. A fresh browser
+    visit to https://search.10jqka.com.cn/ produces a `v=...` cookie
+    (the hexin-v anti-bot token) that grants ~24h of query access.
+    Cookie refresh is a 10-second manual step:
         sudo backend/venv/bin/python3 -m bot.refresh_iwc_cookie
-    which prompts you to paste a fresh Cookie header from your browser
-    (open https://search.10jqka.com.cn/ in Chrome, copy the Cookie
-    request header from DevTools).
+    which prompts you to paste a Cookie header from DevTools.
 """
 import json
 import logging
@@ -68,7 +67,8 @@ def _load_cookies_from_disk() -> dict:
     for item in cookie_str.split("; "):
         if "=" in item:
             k, v = item.split("=", 1)
-            cookies[k] = v
+            # Defensive: strip any trailing \r\n from manual paste
+            cookies[k] = v.strip()
     return cookies
 
 
