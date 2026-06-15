@@ -1,17 +1,22 @@
 """
 iwencai (同花顺) query client.
 
-Loads encrypted cookies from 10jqka_cookies.enc, sends the verified
-POST to get-robot-data, parses the structured stock list out of the
-xuangu_tableV1 component.
+Sends a POST to `get-robot-data` and parses the structured stock list
+out of the xuangu_tableV1 component.
 
-NOTE on cookie refresh:
-    Querying iwencai does NOT require an account login. A fresh browser
-    visit to https://search.10jqka.com.cn/ produces a `v=...` cookie
-    (the hexin-v anti-bot token) that grants ~24h of query access.
-    Cookie refresh is a 10-second manual step:
-        sudo backend/venv/bin/python3 -m bot.refresh_iwc_cookie
-    which prompts you to paste a Cookie header from DevTools.
+Cookie handling
+---------------
+iwencai queries do NOT require an account login. A fresh browser visit
+to https://search.10jqka.com.cn/ produces a `v=...` cookie (the
+hexin-v anti-bot token) that grants ~1-2h of query access. To refresh:
+
+    sudo backend/venv/bin/python3 -m bot.refresh_iwc_cookie
+
+That writes the pasted Cookie header (plaintext) to `bot/.iwc_cookie`.
+
+The cookie is intentionally NOT encrypted — iwc cookies are not
+credentials, they're a per-session anti-bot token. The 0o600 file
+permission is enough.
 """
 import json
 import logging
@@ -21,94 +26,99 @@ import time
 import urllib.parse
 import urllib.request
 from pathlib import Path
-from typing import Optional
 
 logger = logging.getLogger(__name__)
 
-# Allow `from iwc_client import ...` to work from any CWD
 _BOT_DIR = Path(__file__).parent
 if str(_BOT_DIR) not in sys.path:
     sys.path.insert(0, str(_BOT_DIR))
 
-from crypto_utils import decrypt  # noqa: E402
-
 IWC_ENDPOINT = (
     "https://search.10jqka.com.cn/unifiedwap/unified-wap/v2/result/get-robot-data"
 )
-COOKIES_ENC = _BOT_DIR / "10jqka_cookies.enc"
-ENCRYPT_PASSPHRASE = "wwFblXr9ZyaobfcjNoZhApJZZqUs52+3"
-COOKIE_FRESH_TTL_SEC = 24 * 3600  # treat cookies fresh for 24h
+COOKIE_FILE = _BOT_DIR / ".iwc_cookie"
+COOKIE_FRESH_TTL_SEC = 6 * 3600  # 6h: iwc cookies get rate-limited well before 24h
 SOURCE = "Ths_iwencai_Xuangu"
 VERSION = "2.0"
 
 
 class IwcLoginError(Exception):
-    """Cookie file missing or invalid (cannot auto-login from server)."""
+    """Cookie file missing or unreadable."""
 
 
 class IwcQueryError(Exception):
     """Query failed (HTTP error, parse error, or empty result)."""
 
 
-def _load_cookies_from_disk() -> dict:
-    """Decrypt 10jqka_cookies.enc and return cookie dict."""
-    if not COOKIES_ENC.exists():
+def _load_cookie_header() -> str:
+    """Read the raw Cookie header value from COOKIE_FILE.
+
+    The file should contain the full `Cookie:` request header value
+    (e.g. 'chat_bot_session_id=...; v=A8V6E1xa...'). Multiple lines
+    are concatenated.
+    """
+    if not COOKIE_FILE.exists():
         raise IwcLoginError(
-            f"Cookie file not found: {COOKIES_ENC}. "
-            f"Run `python3 -m bot.refresh_iwc_cookie` first."
+            f"Cookie file not found: {COOKIE_FILE}\n"
+            f"Run `sudo backend/venv/bin/python3 -m bot.refresh_iwc_cookie` "
+            f"and paste a Cookie header from your browser."
         )
-    with open(COOKIES_ENC, "r") as f:
-        encrypted = f.read().strip()
-    try:
-        cookie_str = decrypt(encrypted, ENCRYPT_PASSPHRASE)
-    except Exception as e:
-        raise IwcLoginError(f"Failed to decrypt cookies: {e}")
-    cookies = {}
-    for item in cookie_str.split("; "):
-        if "=" in item:
-            k, v = item.split("=", 1)
-            # Defensive: strip any trailing \r\n from manual paste
-            cookies[k] = v.strip()
-    return cookies
+    raw = COOKIE_FILE.read_text(encoding="utf-8").strip()
+    if not raw:
+        raise IwcLoginError(
+            f"Cookie file is empty: {COOKIE_FILE}\n"
+            f"Run `sudo backend/venv/bin/python3 -m bot.refresh_iwc_cookie`."
+        )
+    return raw.replace("\n", " ").strip()
 
 
 def _is_cookie_fresh() -> bool:
-    """True if cookie file mtime is within COOKIE_FRESH_TTL_SEC."""
-    if not COOKIES_ENC.exists():
+    if not COOKIE_FILE.exists():
         return False
-    age = time.time() - COOKIES_ENC.stat().st_mtime
+    age = time.time() - COOKIE_FILE.stat().st_mtime
     return age < COOKIE_FRESH_TTL_SEC
 
 
-def get_valid_cookies(refresh_if_stale: bool = True) -> dict:
-    """Return cookies. Raises IwcLoginError if missing.
+def get_valid_cookies(refresh_if_stale: bool = True) -> str:
+    """Return the raw Cookie header value. Raises IwcLoginError if missing.
 
     If refresh_if_stale and cookies are older than TTL, raises IwcLoginError
-    with a clear message — auto-refresh is not supported (see module docstring).
+    with a clear message.
     """
-    if not COOKIES_ENC.exists():
+    if not COOKIE_FILE.exists():
         raise IwcLoginError(
-            "No cookies file. Run `sudo backend/venv/bin/python3 -m bot.refresh_iwc_cookie`"
+            "No cookie file. Run `sudo backend/venv/bin/python3 -m bot.refresh_iwc_cookie`"
         )
     if refresh_if_stale and not _is_cookie_fresh():
-        age_h = (time.time() - COOKIES_ENC.stat().st_mtime) / 3600
+        age_h = (time.time() - COOKIE_FILE.stat().st_mtime) / 3600
         raise IwcLoginError(
-            f"Cookies are {age_h:.1f}h old (TTL {COOKIE_FRESH_TTL_SEC/3600:.0f}h). "
+            f"Cookie is {age_h:.1f}h old (TTL {COOKIE_FRESH_TTL_SEC/3600:.0f}h). "
             f"Run `sudo backend/venv/bin/python3 -m bot.refresh_iwc_cookie`"
         )
-    return _load_cookies_from_disk()
+    return _load_cookie_header()
+
+
+def _cookie_dict(cookie_str: str) -> dict:
+    """Parse a Cookie header value into a dict (for extracting `v`)."""
+    out = {}
+    for item in cookie_str.split("; "):
+        if "=" in item:
+            k, v = item.split("=", 1)
+            out[k] = v.strip()
+    return out
 
 
 def query(question: str, perpage: int = 50, page: int = 1) -> list[dict]:
     """Run an iwencai question and return the structured stock list.
 
-    Returns list of dicts with at least: code, name. Other fields vary
+    Returns list of dicts with at least: code, 股票简称. Other fields vary
     by query but commonly include: 最新价, 涨跌幅:前复权, 总市值, dde大单净量, etc.
 
     Raises IwcQueryError on HTTP / parse failure.
     Raises IwcLoginError on missing/expired cookies.
     """
-    cookies = get_valid_cookies()
+    cookie_str = get_valid_cookies()
+    cookies = _cookie_dict(cookie_str)
     # hexin-v header is a hexin gateway anti-bot token; it lives in cookies
     # under key 'v' — re-extract and use as the hexin-v header value.
     hexin_v = cookies.get("v")
@@ -143,16 +153,19 @@ def query(question: str, perpage: int = 50, page: int = 1) -> list[dict]:
     req.add_header("Origin", "https://search.10jqka.com.cn")
     req.add_header("Accept", "application/json, text/plain, */*")
     req.add_header("Accept-Language", "zh-CN,zh;q=0.9")
-    # Cookie header (full cookie string)
-    cookie_str = "; ".join(f"{k}={v}" for k, v in cookies.items())
     req.add_header("Cookie", cookie_str)
-    # hexin-v header (the same value as cookie 'v', sent as separate header)
     req.add_header("hexin-v", hexin_v)
 
     try:
         resp = urllib.request.urlopen(req, timeout=30)
         raw = resp.read()
     except urllib.error.HTTPError as e:
+        # Refresh the cookie hint when the gateway rejects us
+        if e.code in (401, 403):
+            raise IwcQueryError(
+                f"HTTP {e.code} from iwencai (cookie may be expired/rate-limited). "
+                f"Run `python3 -m bot.refresh_iwc_cookie`."
+            ) from e
         raise IwcQueryError(f"HTTP {e.code} from iwencai: {e.reason}") from e
     except Exception as e:
         raise IwcQueryError(f"iwencai request failed: {e}") from e
@@ -184,26 +197,14 @@ def query(question: str, perpage: int = 50, page: int = 1) -> list[dict]:
             break
 
     if not rows:
-        # 0 hits is a valid outcome (e.g. 选股条件太严), not an error
-        logger.info(f"iwencai query returned 0 rows: {question[:60]}")
+        logger.info(f"iwc query returned 0 rows: {question[:60]}")
         return []
 
-    # Normalize: add code/stock_code aliases, strip date suffixes
-    out = []
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        # iwencai uses 'code' as the bare 6-digit number
-        code = r.get("code") or r.get("stock_code")
-        if not code:
-            continue
-        # '最新价' is the latest close / realtime price
-        out.append(r)
-    return out
+    return [r for r in rows if isinstance(r, dict) and r.get("code")]
 
 
 # =========================================================================
-# Strategy-specific query (the "连续三日流入" strategy)
+# Default test query (the "连续三日流入" strategy)
 # =========================================================================
 STRATEGY_NAME = "连续三日流入"
 STRATEGY_QUERY = (
@@ -220,6 +221,6 @@ if __name__ == "__main__":
         rows = query(STRATEGY_QUERY, perpage=50)
         print(f"Got {len(rows)} rows")
         for r in rows[:5]:
-            print(f"  {r.get('code')} {r.get('最新价')} {r.get('涨跌幅:前复权')}")
+            print(f"  {r.get('code')} {r.get('股票简称')} {r.get('最新价')}")
     except (IwcLoginError, IwcQueryError) as e:
         print(f"Error: {e}")

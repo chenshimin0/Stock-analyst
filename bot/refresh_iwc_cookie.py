@@ -1,28 +1,23 @@
 """
-Refresh the iwencai cookie file from a browser Cookie header.
+Refresh the iwencai cookie by pasting a Cookie header from your browser.
 
 Usage (on server):
     sudo backend/venv/bin/python3 -m bot.refresh_iwc_cookie
 
-Then either:
-  1. Paste a full Cookie header value (e.g. from Chrome DevTools)
-  2. Or paste cookie name=value; name=value; ...
+Steps:
+  1. Open https://search.10jqka.com.cn/ in Chrome (no login needed)
+  2. F12 → Network → any request → copy the `Cookie:` request header value
+  3. Paste it below
 
-The cookie string is encrypted with the same Fernet key as
-10jqka_cookies.enc and written back to disk.
+The cookie is written in plaintext to bot/.iwc_cookie (mode 0o600).
 """
-import getpass
+import os
 import sys
 import time
 from pathlib import Path
 
 _BOT_DIR = Path(__file__).parent
-sys.path.insert(0, str(_BOT_DIR))
-
-from crypto_utils import encrypt  # noqa: E402
-
-ENCRYPT_PASSPHRASE = "wwFblXr9ZyaobfcjNoZhApJZZqUs52+3"
-COOKIES_ENC = _BOT_DIR / "10jqka_cookies.enc"
+COOKIE_FILE = _BOT_DIR / ".iwc_cookie"
 
 
 def main():
@@ -31,44 +26,34 @@ def main():
     print("=" * 60)
     print()
     print("操作步骤:")
-    print("  1. 在浏览器打开 https://search.10jqka.com.cn/ (不用登录账号)")
-    print("  2. 按 F12 → Network → 任意点一个 request")
-    print("  3. 复制请求头里的 Cookie: 完整值")
-    print("  4. 也可同时复制 hexin-v: 值（可选，Cookie 里的 v= 字段已等同）")
-    print("  5. 粘到下面")
+    print("  1. 浏览器打开 https://search.10jqka.com.cn/ (不用登录账号)")
+    print("  2. F12 → Network → 任意点一个 request")
+    print("  3. 复制请求头里的 Cookie: 完整 value")
+    print("  4. 粘到下面 (单独一行)")
     print()
-    print("示例格式 (一行):")
-    print("  Hm_lvt_xxx=123; PHPSESSID=abc; userid=873448943; v=Ax-IZmUCifp...")
+    print("提示: Cookie 通常含 'v=...' 字段 (hexin-v 反爬 token)。")
     print()
 
-    raw = getpass.getpass("Cookie (输入隐藏): ").strip()
+    try:
+        import getpass
+        raw = getpass.getpass("Cookie: ").strip()
+    except EOFError:
+        raw = sys.stdin.read().strip()
+
     if not raw:
         print("空输入，退出")
         return 1
 
-    # If they pasted a full Cookie header value, it might be one big string
-    # of "name=value; name=value". Normalize to "; " separator.
-    cookie_str = raw.replace("\n", " ").strip()
-    # Validate that we got at least the required keys
-    must_have = ("v",)
-    missing = [k for k in must_have if f"{k}=" not in cookie_str]
-    if missing:
-        print(f"ERROR: cookie missing required fields: {missing}")
-        print("       需要 'v' 字段（hexin-v token）")
+    if "v=" not in raw:
+        print("ERROR: cookie 缺少 'v=' 字段 (hexin-v token)")
         return 1
 
-    # Encrypt and write
-    encrypted = encrypt(cookie_str, ENCRYPT_PASSPHRASE)
-    COOKIES_ENC.write_text(encrypted)
-
-    # Touch the file to current mtime (so freshness check passes)
-    now = time.time()
-    import os
-    os.utime(COOKIES_ENC, (now, now))
+    COOKIE_FILE.write_text(raw + "\n", encoding="utf-8")
+    os.chmod(COOKIE_FILE, 0o600)
+    os.utime(COOKIE_FILE, (time.time(), time.time()))
 
     print()
-    print(f"✓ Saved encrypted cookies to {COOKIES_ENC}")
-    print(f"  Size: {len(cookie_str)} chars")
+    print(f"✓ Saved {len(raw)} chars to {COOKIE_FILE} (mode 0o600)")
     print()
     print("Test query:")
     print("  sudo backend/venv/bin/python3 -m bot.iwc_client")
