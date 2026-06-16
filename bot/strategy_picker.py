@@ -1,5 +1,7 @@
 """
-Run the iwencai strategy pick per strategy definition.
+Run the strategy pick per strategy definition.
+
+Uses EastMoney push2 API for stock screening (fully automatic, no cookies/login).
 
 Two entry points:
   run_one_strategy(strategy_id) -> dict  : single strategy, sync
@@ -18,7 +20,7 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.database import SessionLocal  # noqa: E402
 from app.models import Strategy, StrategyPick, StrategyPickStock  # noqa: E402
-from iwc_client import IwcLoginError, IwcQueryError, query  # noqa: E402
+from eastmoney_screener import ScreenerQueryError, query  # noqa: E402
 
 logger = logging.getLogger("strategy_picker")
 
@@ -69,20 +71,15 @@ def _pick_for(strategy: Strategy, db) -> dict:
     }
     try:
         rows = query(strategy.query_text, perpage=50)
-    except IwcLoginError as e:
-        out["message"] = f"Cookie 问题: {e}"
-        out["errors"].append(str(e))
-        logger.error(f"[{strategy.name}] {out['message']}")
-        return out
-    except IwcQueryError as e:
-        out["message"] = f"iwencai 查询失败: {e}"
+    except ScreenerQueryError as e:
+        out["message"] = f"选股查询失败: {e}"
         out["errors"].append(str(e))
         logger.error(f"[{strategy.name}] {out['message']}")
         return out
 
     if not rows:
         out["ok"] = True
-        out["message"] = "iwencai 今日返回 0 条"
+        out["message"] = "选股器今日返回 0 条"
         logger.info(f"[{strategy.name}] {out['message']}")
         return out
 
