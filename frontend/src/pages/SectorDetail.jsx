@@ -62,6 +62,7 @@ export default function SectorDetail() {
             <th style={th}>名称</th>
             <th style={th}>推荐理由</th>
             <th style={th}>T+0 价</th>
+            <th style={th}>T+3</th>
             <th style={th}>T+5</th>
             <th style={th}>T+10</th>
             <th style={th}>T+20</th>
@@ -74,6 +75,7 @@ export default function SectorDetail() {
               <td style={td}>{s.name}</td>
               <td style={td}>{s.reason}</td>
               <td style={td}>{s.t0_price != null ? s.t0_price.toFixed(2) : '—'}</td>
+              <td style={td}><Pct value={s.t3_pct} /></td>
               <td style={td}><Pct value={s.t5_pct} /></td>
               <td style={td}><Pct value={s.t10_pct} /></td>
               <td style={td}><Pct value={s.t20_pct} /></td>
@@ -81,6 +83,7 @@ export default function SectorDetail() {
           ))}
           <tr style={{ background: '#fff3cd', color: '#5d4037', fontWeight: 600 }}>
             <td style={td} colSpan={4}>板块平均</td>
+            <td style={td}><Pct value={pick.avg_t3_pct} /></td>
             <td style={td}><Pct value={avgT5} /></td>
             <td style={td}><Pct value={avgT10} /></td>
             <td style={td}><Pct value={avgT20} /></td>

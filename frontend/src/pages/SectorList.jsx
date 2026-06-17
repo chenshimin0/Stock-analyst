@@ -62,6 +62,7 @@ export default function SectorList() {
               <th style={th}>状态</th>
               <th style={th}>数据源</th>
               <th style={th}>创建时间</th>
+              <th style={th}>板块 T+3</th>
               <th style={th}>板块 T+5</th>
               <th style={th}>板块 T+10</th>
               <th style={th}>板块 T+20</th>
@@ -76,6 +77,7 @@ export default function SectorList() {
                 <td style={td}><StatusBadge status={p.status} /></td>
                 <td style={td}>{p.selection_source === 'api_driven' ? 'API 实时' : 'AI 知识'}</td>
                 <td style={td}>{new Date(p.created_at).toLocaleString()}</td>
+                <td style={td}><Pct value={p.avg_t3_pct} /></td>
                 <td style={td}><Pct value={p.avg_t5_pct} /></td>
                 <td style={td}><Pct value={p.avg_t10_pct} /></td>
                 <td style={td}><Pct value={p.avg_t20_pct} /></td>

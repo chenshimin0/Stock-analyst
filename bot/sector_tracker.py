@@ -102,7 +102,7 @@ def get_t_n_data_for_stock(
     bars = _kline_to_bars(raw_bars)
     if not bars:
         return out
-    for n in (5, 10, 20):
+    for n in (3, 5, 10, 20):
         bar = find_trading_day_after(bars, t0_date, n)
         if not bar:
             continue

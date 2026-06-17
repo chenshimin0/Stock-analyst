@@ -28,6 +28,7 @@ class StockMetric(BaseModel):
     name: str
     reason: str
     t0_price: Optional[float]
+    t3_pct: Optional[float]
     t5_pct: Optional[float]
     t10_pct: Optional[float]
     t20_pct: Optional[float]
@@ -39,6 +40,7 @@ class SectorPickListItem(BaseModel):
     status: str
     selection_source: str
     created_at: datetime
+    avg_t3_pct: Optional[float]
     avg_t5_pct: Optional[float]
     avg_t10_pct: Optional[float]
     avg_t20_pct: Optional[float]
