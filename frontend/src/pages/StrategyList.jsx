@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { listStrategyPicks, deleteStrategyPick } from '../api/strategy.js';
+import { listStrategyPicks, deleteStrategyPick, deleteStockRow } from '../api/strategy.js';
 import { listStrategies } from '../api/strategies.js';
 
 const TABS = [
@@ -87,6 +87,17 @@ function PickCard({ pick, strategyName, onDeleted }) {
   const preview = pick.stocks_preview || [];
   const hidden = pick.hit_count - preview.length;
 
+  const handleDeleteStock = async (stockId, stockName) => {
+    if (!confirm(`确认从批次 #${pick.id} 中删除 ${stockName}？`)) return;
+    try {
+      await deleteStockRow(stockId);
+      // Refresh by fetching again
+      window.location.reload();
+    } catch (e) {
+      alert('删除失败：' + e.message);
+    }
+  };
+
   const handleDelete = async () => {
     if (!confirm(`确认永久删除批次 #${pick.id}？\n该批次 ${pick.hit_count} 只股票的 T+N 追踪数据将全部丢失。`)) return;
     try {
@@ -157,6 +168,7 @@ function PickCard({ pick, strategyName, onDeleted }) {
               <th style={{...th, color: '#e5e7eb'}}>T+7</th>
               <th style={{...th, color: '#e5e7eb'}}>T+15</th>
               <th style={{...th, color: '#e5e7eb', borderRadius: '0 6px 0 0'}}>T+30</th>
+              <th style={{...th, color: '#e5e7eb', width: 30}}></th>
             </tr>
           </thead>
           <tbody>
@@ -178,6 +190,13 @@ function PickCard({ pick, strategyName, onDeleted }) {
                 <td style={td}><Pct value={s.t7_pct} /></td>
                 <td style={td}><Pct value={s.t15_pct} /></td>
                 <td style={td}><Pct value={s.t30_pct} /></td>
+                <td style={{...td, padding: '2px'}}>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDeleteStock(s.id, s.stock_name); }}
+                    title="从批次中删除"
+                    style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444', border: '1px solid rgba(239,68,68,0.3)', borderRadius: 4, cursor: 'pointer', fontSize: 11, padding: '2px 5px' }}
+                  >✕</button>
+                </td>
               </tr>
             ))}
           </tbody>
