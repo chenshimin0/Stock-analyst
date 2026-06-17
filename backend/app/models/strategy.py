@@ -7,7 +7,7 @@ A StrategyPick batch is one cron run of a Strategy. The relationship is
 A Strategy carries:
 - name: human label
 - query_text: full iwencai query
-- schedule_cron: "HH:MM" weekday format, defaults to 14:30
+- schedule_cron: comma-separated "HH:MM" times, e.g. "09:35,14:45"
 - enabled: scheduler skips disabled strategies
 
 Note: StrategyPick.strategy_id FK is added in models/strategy_pick.py.

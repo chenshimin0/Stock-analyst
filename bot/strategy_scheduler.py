@@ -48,13 +48,18 @@ def _safe_track() -> None:
         logger.error(f"track_all_picks crashed: {e}\n{traceback.format_exc()}")
 
 
-def _parse_cron(spec: str) -> tuple[int, int]:
-    """Parse 'HH:MM' to (hour, minute). Default 14:30 on bad input."""
-    try:
-        h, m = spec.split(":", 1)
-        return int(h), int(m)
-    except Exception:
-        return 14, 30
+def _parse_cron_list(spec: str) -> list[tuple[int, int]]:
+    """Parse comma-separated times like '09:35,14:45' to [(h,m), ...].
+    Default [14, 30] on bad input."""
+    times = []
+    for part in spec.split(","):
+        part = part.strip()
+        try:
+            h, m = part.split(":", 1)
+            times.append((int(h), int(m)))
+        except Exception:
+            continue
+    return times if times else [(14, 30)]
 
 
 def reload_pick_jobs(scheduler: BlockingScheduler) -> int:
@@ -70,18 +75,19 @@ def reload_pick_jobs(scheduler: BlockingScheduler) -> int:
         if job.id.startswith("strategy_pick_"):
             scheduler.remove_job(job.id)
 
-    # Re-add
+    # Re-add — one job per strategy per time slot
     for s in enabled:
-        h, m = _parse_cron(s.schedule_cron)
-        scheduler.add_job(
-            _safe_pick_one,
-            CronTrigger(hour=h, minute=m, day_of_week="mon-fri",
-                        timezone="Asia/Shanghai"),
-            args=[s.id],
-            id=f"strategy_pick_{s.id}",
-            replace_existing=True,
-        )
-        logger.info(f"  scheduled strategy {s.id} ({s.name}) at {h:02d}:{m:02d} weekdays")
+        for idx, (h, m) in enumerate(_parse_cron_list(s.schedule_cron)):
+            job_id = f"strategy_pick_{s.id}" if idx == 0 else f"strategy_pick_{s.id}_{idx}"
+            scheduler.add_job(
+                _safe_pick_one,
+                CronTrigger(hour=h, minute=m, day_of_week="mon-fri",
+                            timezone="Asia/Shanghai"),
+                args=[s.id],
+                id=job_id,
+                replace_existing=True,
+            )
+            logger.info(f"  scheduled strategy {s.id} ({s.name}) at {h:02d}:{m:02d} weekdays")
     return len(enabled)
 
 

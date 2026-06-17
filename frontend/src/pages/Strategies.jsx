@@ -107,7 +107,7 @@ export default function Strategies() {
               <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
                 <td style={td}>#{s.id}</td>
                 <td style={td}><b>{s.name}</b></td>
-                <td style={td}>工作日 {s.schedule_cron}</td>
+                <td style={{...td, fontSize: 13}}>工作日 {s.schedule_cron.replace(/,/g, ', ')}</td>
                 <td style={td}>
                   <span style={{
                     padding: '2px 8px', borderRadius: 4, fontSize: 12,
@@ -185,8 +185,9 @@ function StrategyForm({ initial, onSave, onCancel }) {
         </label>
       </div>
       <div style={{ marginBottom: 12 }}>
-        <label style={label}>调度时间 (HH:MM, 工作日)<br/>
-          <input style={{...input, width: 100}} value={form.schedule_cron}
+        <label style={label}>调度时间 (HH:MM, 逗号分隔多个, 工作日)<br/>
+          <input style={{...input, width: 180}} value={form.schedule_cron}
+                 placeholder="09:35,14:45"
                  onChange={e => setForm({...form, schedule_cron: e.target.value})} />
         </label>
       </div>
