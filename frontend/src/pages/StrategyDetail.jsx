@@ -45,7 +45,7 @@ export default function StrategyDetail() {
 
       <h2>策略批次 #{pick.id} — {pick.strategy_name}</h2>
 
-      <div style={{ marginBottom: 16, color: '#666', fontSize: 13 }}>
+      <div style={{ marginBottom: 16, color: '#9ca3af', fontSize: 13 }}>
         <div>创建时间：{new Date(pick.created_at).toLocaleString()}</div>
         <div>状态：{statusLabel(pick.status)}</div>
         <div>命中：{pick.hit_count} 只</div>
@@ -53,8 +53,9 @@ export default function StrategyDetail() {
       </div>
 
       <div style={{
-        background: '#f5f5f5', padding: 10, borderRadius: 4,
-        marginBottom: 16, fontSize: 12, color: '#555',
+        background: '#1a2236', padding: 10, borderRadius: 4,
+        marginBottom: 16, fontSize: 12, color: '#9ca3af',
+        border: '1px solid #1e293b',
       }}>
         <div style={{ fontWeight: 600, marginBottom: 4 }}>查询条件：</div>
         <div style={{ fontFamily: 'monospace' }}>{pick.query_text}</div>
@@ -64,21 +65,29 @@ export default function StrategyDetail() {
       {pick.stocks && pick.stocks.length > 0 ? (
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr style={{ background: '#37474f', color: '#fff' }}>
-              <th style={th}>代码</th>
+            <tr style={{ background: '#1e293b' }}>
+              <th style={{...th, borderRadius: '8px 0 0 0'}}>代码</th>
               <th style={th}>名称</th>
               <th style={th}>行业</th>
               <th style={th}>主营</th>
               <th style={th}>选入价</th>
+              <th style={th}>T+1</th>
               <th style={th}>T+3</th>
               <th style={th}>T+7</th>
               <th style={th}>T+15</th>
-              <th style={th}>T+30</th>
+              <th style={{...th, borderRadius: '0 8px 0 0'}}>T+30</th>
             </tr>
           </thead>
           <tbody>
-            {pick.stocks.map(s => (
-              <tr key={s.id} style={{ borderBottom: '1px solid #eee' }}>
+            {pick.stocks.map((s, i) => (
+              <tr key={s.id} style={{
+                borderBottom: '1px solid #1e293b',
+                background: i % 2 === 0 ? '#0f172a' : '#1a2236',
+                transition: 'background 0.15s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background = '#1e3a5f'}
+              onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? '#0f172a' : '#1a2236'}
+              >
                 <td style={td}>{s.stock_code}</td>
                 <td style={td}>{s.stock_name}</td>
                 <td style={td}>{s.industry || <span style={{color:'#999'}}>—</span>}</td>
@@ -87,6 +96,7 @@ export default function StrategyDetail() {
                   {s.business_summary || <span style={{color:'#999'}}>—</span>}
                 </td>
                 <td style={td}>{s.t0_price?.toFixed(2) || '—'}</td>
+                <td style={td}><Pct value={s.t1_pct} sub={s.t1_date} /></td>
                 <td style={td}><Pct value={s.t3_pct} sub={s.t3_date} /></td>
                 <td style={td}><Pct value={s.t7_pct} sub={s.t7_date} /></td>
                 <td style={td}><Pct value={s.t15_pct} sub={s.t15_date} /></td>
@@ -132,17 +142,23 @@ function statusLabel(s) {
 }
 
 function Pct({ value, sub }) {
-  if (value == null) return <span style={{ color: '#999' }}>{sub ? `(${sub})` : '—'}</span>;
+  if (value == null) return <span style={{ color: '#9ca3af' }}>{sub ? `(${sub})` : '—'}</span>;
   const isPos = value > 0;
   const isNeg = value < 0;
-  const color = isPos ? '#d32f2f' : isNeg ? '#2e7d32' : '#333';
+  const color = isPos ? '#ef4444' : isNeg ? '#22c55e' : '#d1d5db';
+  const bg = isPos ? 'rgba(239,68,68,0.12)' : isNeg ? 'rgba(34,197,94,0.12)' : 'transparent';
   return (
-    <div style={{ fontSize: 13 }}>
-      <span style={{ color, fontWeight: 600 }}>{value > 0 ? '+' : ''}{value.toFixed(2)}%</span>
-      {sub && <div style={{ fontSize: 10, color: '#999' }}>{sub}</div>}
+    <div>
+      <span style={{
+        color, fontWeight: 700, fontSize: 14,
+        background: bg, padding: '2px 8px', borderRadius: 4,
+      }}>
+        {value > 0 ? '+' : ''}{value.toFixed(2)}%
+      </span>
+      {sub && <div style={{ fontSize: 10, color: '#6b7280', marginTop: 2 }}>{sub}</div>}
     </div>
   );
 }
 
-const th = { padding: '8px 12px', textAlign: 'left', fontSize: 13, color: '#fff' };
-const td = { padding: '8px 12px', fontSize: 14 };
+const th = { padding: '10px 14px', textAlign: 'left', fontSize: 13, color: '#e5e7eb', fontWeight: 600, background: '#1e293b', borderBottom: '2px solid #334155' };
+const td = { padding: '10px 14px', fontSize: 14, color: '#f1f5f9' };

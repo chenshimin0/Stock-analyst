@@ -114,72 +114,183 @@ def _parse_conditions(query: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# push2 clist — bulk stock screening
+# Stock universe via mootdx + Tencent batch quotes
+# (push2 clist rc=102 — blocked/invalid, so we use mootdx for stock list
+#  and Tencent qt.gtimg.cn for real-time filtering)
 # ---------------------------------------------------------------------------
-def _fetch_from_push2(fs_filters: list[str], perpage: int = 200) -> list[dict]:
-    """Fetch stocks from EastMoney push2 clist API with given filters.
 
-    Returns up to `perpage` stocks matching the filter criteria.
+# Lazy cache for stock list (mootdx TCP call, ~2s)
+_STOCK_LIST_CACHE = None
+
+
+# Valid A-stock code prefixes
+_A_STOCK_PREFIXES = (
+    "600", "601", "603", "605",           # Shanghai main board
+    "688", "689",                          # Shanghai STAR
+    "000", "001", "002", "003", "004",    # Shenzhen main/sme
+    "300", "301",                          # Shenzhen ChiNext
+    "800", "830", "831", "832", "833",    # Beijing Stock Exchange
+    "834", "835", "836", "837", "838",
+    "839", "870", "871", "872", "873", "874",
+    "875", "876", "877", "878", "879",
+    "920",
+)
+
+
+def _get_all_stocks() -> list[dict]:
+    """Get all A-stock codes + names via mootdx. Cached per process."""
+    global _STOCK_LIST_CACHE
+    if _STOCK_LIST_CACHE is not None:
+        return _STOCK_LIST_CACHE
+    try:
+        from mootdx.quotes import Quotes
+        client = Quotes.factory(market="std")
+        # stock_all() returns a DataFrame with all securities
+        df = client.stock_all()
+        stocks = []
+        for _, row in df.iterrows():
+            code = str(row["code"]).strip()
+            name = str(row.get("name", "")).strip().replace("\x00", "")
+            # Must be 6-digit code and match known A-stock prefixes
+            if len(code) == 6 and code.isdigit() and code[:3] in _A_STOCK_PREFIXES and name:
+                stocks.append({"code": code, "name": name})
+        _STOCK_LIST_CACHE = stocks
+        logger.info(f"mootdx: loaded {len(stocks)} A-stocks")
+        return stocks
+    except Exception as e:
+        logger.warning(f"mootdx stock list failed: {e}")
+        return []
+
+
+def _filter_by_board(stocks: list[dict], conditions: dict) -> list[dict]:
+    """Filter stocks by board type based on code prefix.
+
+    主板: 600-605 (Shanghai), 000-004 (Shenzhen)
+    创业板: 300-301
+    科创板: 688-689
     """
-    all_stocks = []
-    page = 1
-    max_pages = 3  # safety: never fetch more than 600 stocks total
+    MAIN_SH = ("600", "601", "603", "605")
+    MAIN_SZ = ("000", "001", "002", "003", "004")
+    GEM = ("300", "301")
+    STAR = ("688", "689")
 
-    while page <= max_pages:
-        params = {
-            "pn": str(page),
-            "pz": str(min(perpage, 200)),
-            "po": "0",
-            "np": "1",
-            "ut": "bd1d9ddb04089700cf9c27f6f7426281",
-            "fltt": "2",
-            "invt": "2",
-            "fid": "f3",
-            "fs": ",".join(fs_filters),
-            "fields": PUSH2_FIELDS,
-        }
-        qs = urllib.parse.urlencode(params)
-        url = f"{PUSH2_CLIST_URL}?{qs}"
-        req = urllib.request.Request(url, headers={
-            "User-Agent": UA,
-            "Referer": "https://quote.eastmoney.com/",
-        })
+    result = []
+    for s in stocks:
+        code = s["code"]
+        if conditions.get("main_board"):
+            if code.startswith(MAIN_SH) or code.startswith(MAIN_SZ):
+                result.append(s)
+        elif conditions.get("gem"):
+            if code.startswith(GEM):
+                result.append(s)
+        elif conditions.get("star"):
+            if code.startswith(STAR):
+                result.append(s)
+        else:
+            result.append(s)
+    return result
+
+
+def _batch_tencent_quote(stocks: list[dict], batch_size: int = 80) -> dict[str, dict]:
+    """Batch query Tencent API for real-time quotes.
+
+    Returns dict: {code: {price, change_pct, turnover, market_cap, pe_ttm, ...}}
+    """
+    result = {}
+    for i in range(0, len(stocks), batch_size):
+        batch = stocks[i:i + batch_size]
+        prefixed = []
+        for s in batch:
+            code = s["code"]
+            if code.startswith(("6", "9")):
+                prefixed.append(f"sh{code}")
+            elif code.startswith("8"):
+                prefixed.append(f"bj{code}")
+            else:
+                prefixed.append(f"sz{code}")
+        url = "http://qt.gtimg.cn/q=" + ",".join(prefixed)
         try:
+            req = urllib.request.Request(url, headers={"User-Agent": UA})
             resp = urllib.request.urlopen(req, timeout=15)
-            data = json.loads(resp.read())
-        except urllib.error.HTTPError as e:
-            raise ScreenerQueryError(f"push2 HTTP {e.code}: {e.reason}")
+            raw = resp.read().decode("gbk", errors="replace")
         except Exception as e:
-            raise ScreenerQueryError(f"push2 request failed: {e}")
+            logger.warning(f"Tencent batch query failed at offset {i}: {e}")
+            continue
 
-        result = data.get("data")
-        if not result:
-            break
+        for line in raw.strip().split(";"):
+            if "=" not in line or '"' not in line:
+                continue
+            try:
+                key = line.split("=")[0].split("_")[-1]
+                vals = line.split('"')[1].split("~")
+                code = key[2:]
+                if len(vals) < 53:
+                    continue
+                result[code] = {
+                    "name": vals[1],
+                    "price": float(vals[3]) if vals[3] else 0,
+                    "change_pct": float(vals[32]) if vals[32] else 0,
+                    "turnover": float(vals[37]) * 10000 if vals[37] else 0,
+                    "market_cap": float(vals[44]) * 1e8 if vals[44] else 0,
+                    "pe_ttm": float(vals[39]) if vals[39] else 0,
+                }
+            except (IndexError, ValueError):
+                continue
+    return result
 
-        stocks = result.get("diff") or []
-        if not stocks:
-            break
 
-        for s in stocks:
-            all_stocks.append({
-                "code": (s.get("f12") or "").strip(),
-                "name": (s.get("f14") or "").strip(),
-                "price": float(s.get("f2", 0) or 0),
-                "change_pct": float(s.get("f3", 0) or 0),
-                "turnover": float(s.get("f6", 0) or 0),
-                "market_cap": float(s.get("f20", 0) or 0),
-                "pe_ttm": float(s.get("f115", 0) or 0),
-                "big_order_net": float(s.get("f161", 0) or 0),
-                "super_large_net": float(s.get("f162", 0) or 0),
-                "large_net": float(s.get("f163", 0) or 0),
-            })
+def _fetch_candidates(conditions: dict) -> list[dict]:
+    """Fetch stock candidates using mootdx + Tencent (replaces push2 clist).
 
-        total = result.get("total", 0)
-        if page * 200 >= total or len(stocks) < 200:
-            break
-        page += 1
+    Returns list of dicts with: code, name, price, change_pct, turnover,
+    market_cap, pe_ttm.
+    """
+    # Step 1: Get stock universe
+    all_stocks = _get_all_stocks()
+    if not all_stocks:
+        raise ScreenerQueryError("无法获取股票列表 (mootdx)")
 
-    return all_stocks
+    # Step 2: Filter by board
+    filtered = _filter_by_board(all_stocks, conditions)
+    logger.info(f"After board filter: {len(filtered)} stocks")
+
+    if not filtered:
+        return []
+
+    # Step 3: Batch query Tencent for real-time data
+    quotes = _batch_tencent_quote(filtered, batch_size=80)
+    logger.info(f"Tencent returned quotes for {len(quotes)} stocks")
+
+    # Step 4: Apply numeric filters (market cap, turnover, change)
+    candidates = []
+    for s in filtered:
+        q = quotes.get(s["code"])
+        if not q:
+            continue
+        # Market cap filter (in 亿)
+        if conditions.get("market_cap_min"):
+            if q["market_cap"] < conditions["market_cap_min"] * 1e8:
+                continue
+        # Turnover filter (in 亿)
+        if conditions.get("turnover_min"):
+            if q["turnover"] < conditions["turnover_min"] * 1e8:
+                continue
+        # Change % max
+        if conditions.get("change_max") is not None:
+            if q["change_pct"] >= conditions["change_max"]:
+                continue
+        # Change % min
+        if conditions.get("change_min") is not None:
+            if q["change_pct"] <= conditions["change_min"]:
+                continue
+        candidates.append({
+            "code": s["code"],
+            "name": s["name"],
+            **q,
+        })
+
+    logger.info(f"After numeric filters: {len(candidates)} candidates")
+    return candidates
 
 
 # ---------------------------------------------------------------------------
@@ -195,7 +306,7 @@ def _check_ma_bull(code: str) -> bool:
         prefix = "sh" if code.startswith(("6", "9")) else "sz"
         url = (
             f"http://money.finance.sina.com.cn/quotes_service/api/json_v2.php/"
-            f"CN_MarketData.getKLineData?symbol={prefix}{code}&scale=60&ma=no&datalen=80"
+            f"CN_MarketData.getKLineData?symbol={prefix}{code}&scale=240&ma=no&datalen=80"
         )
         req = urllib.request.Request(url, headers={"User-Agent": UA})
         resp = urllib.request.urlopen(req, timeout=10)
@@ -245,13 +356,15 @@ def _check_big_order_flow(code: str, days: int = 3) -> bool:
         if not klines or len(klines) < days:
             return False
 
-        # Check last N days: large_net (index 7) must be > 0 for each day
+        # Check last N days: 主力净流入 (大单+超大单合计, index 1) must be > 0 for each day.
+        # iwencai DDE aggregates large+super-large orders; push2his splits them.
+        # Using 主力净流入 (combined) gives closer alignment.
         for line in klines[-days:]:
             p = line.split(",")
-            if len(p) < 8:
+            if len(p) < 3:
                 return False
-            large_net = float(p[7]) if p[7] != "-" else 0
-            if large_net <= 0:
+            main_net = float(p[1]) if p[1] != "-" else 0
+            if main_net <= 0:
                 return False
         return True
     except Exception as e:
@@ -332,46 +445,15 @@ def query(question: str, perpage: int = 50, page: int = 1) -> list[dict]:
     conditions = _parse_conditions(question)
     logger.info(f"Parsed conditions: {conditions}")
 
-    # --- Build push2 filter string ---
-    fs_parts = []
-
-    # Board selection
-    if conditions["main_board"]:
-        fs_parts.extend(BOARD_MAIN)
-    if conditions["gem"]:
-        fs_parts.extend(BOARD_GEM)
-    if conditions["star"]:
-        fs_parts.extend(BOARD_STAR)
-
-    # Default: all A-stocks if no board specified
-    if not fs_parts:
-        fs_parts = ["m:0+t+6", "m:0+t+7", "m:0+t+8", "m:1+t+23"]
-
-    # Market cap filter (push2 field f20 is in yuan, market_cap_min is in 亿)
-    if conditions["market_cap_min"]:
-        fs_parts.append(f"f20>{int(conditions['market_cap_min'] * 1e8)}")
-
-    # Turnover filter (f6 is in yuan, turnover_min is in 亿)
-    if conditions["turnover_min"]:
-        fs_parts.append(f"f6>{int(conditions['turnover_min'] * 1e8)}")
-
-    # Price change filter
-    if conditions["change_max"] is not None:
-        fs_parts.append(f"f3<{conditions['change_max']}")
-    if conditions["change_min"] is not None:
-        fs_parts.append(f"f3>{conditions['change_min']}")
-
-    logger.info(f"push2 fs filter: {fs_parts}")
-
-    # --- Fetch from push2 ---
+    # --- Fetch candidates via mootdx + Tencent ---
     try:
-        stocks = _fetch_from_push2(fs_parts, perpage=300)
+        stocks = _fetch_candidates(conditions)
     except ScreenerQueryError:
         raise
     except Exception as e:
-        raise ScreenerQueryError(f"push2 query failed: {e}")
+        raise ScreenerQueryError(f"选股查询失败: {e}")
 
-    logger.info(f"push2 returned {len(stocks)} candidates")
+    logger.info(f"Tencent screener returned {len(stocks)} candidates")
 
     if not stocks:
         return []

@@ -66,7 +66,7 @@ export default function Dashboard() {
             onClick={handleRefreshPrices}
             disabled={refreshing}
           >
-            {refreshing ? '刷新中...' : '刷新前复权价格'}
+            {refreshing ? '刷新中...' : '刷新报告日收盘价'}
           </button>
           <span className="refresh-indicator">
             <span className="dot"></span> 实时刷新中

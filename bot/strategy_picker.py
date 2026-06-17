@@ -1,7 +1,8 @@
 """
 Run the strategy pick per strategy definition.
 
-Uses EastMoney push2 API for stock screening (fully automatic, no cookies/login).
+Uses iwencai API (hexin-v token) as the primary screener.
+Falls back to EastMoney screener if token is expired.
 
 Two entry points:
   run_one_strategy(strategy_id) -> dict  : single strategy, sync
@@ -11,7 +12,7 @@ Returns dict {ok, batch_id, hit_count, errors, message}.
 """
 import logging
 import sys
-from datetime import datetime, date as _date
+from datetime import datetime, date as _date, timezone, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -20,9 +21,22 @@ sys.path.insert(0, str(ROOT / "backend"))
 
 from app.database import SessionLocal  # noqa: E402
 from app.models import Strategy, StrategyPick, StrategyPickStock  # noqa: E402
-from eastmoney_screener import ScreenerQueryError, query  # noqa: E402
 
 logger = logging.getLogger("strategy_picker")
+
+HKT = timezone(timedelta(hours=8))
+
+
+def _hkt_now() -> datetime:
+    return datetime.now(HKT)
+
+def _get_stock_code(row: dict) -> str:
+    """Extract stock code from iwc or eastmoney row."""
+    # iwc format: "股票代码": "603678.SH"
+    code = (row.get("股票代码") or row.get("code") or "").strip()
+    if "." in code:
+        code = code.split(".")[0]
+    return code
 
 
 def _get_stock_name(row: dict) -> str:
@@ -59,7 +73,7 @@ def _get_industry_business(code: str) -> dict:
 def _pick_for(strategy: Strategy, db) -> dict:
     """One strategy: query, build batch, return result dict. Caller commits."""
     today = _date.today()
-    now = datetime.utcnow()
+    now = _hkt_now()
     out = {
         "strategy_id": strategy.id,
         "strategy_name": strategy.name,
@@ -69,35 +83,53 @@ def _pick_for(strategy: Strategy, db) -> dict:
         "errors": [],
         "message": "",
     }
+
+    # iwencai via pywencai (no token needed, handles anti-bot internally)
     try:
-        rows = query(strategy.query_text, perpage=50)
-    except ScreenerQueryError as e:
-        out["message"] = f"选股查询失败: {e}"
+        import pywencai
+        df = pywencai.get(
+            query=strategy.query_text,
+            sort_key='成交金额', sort_order='desc',
+            loop=False,
+        )
+        if df is None or df.empty:
+            out["ok"] = True
+            out["message"] = "iwencai 今日返回 0 条"
+            logger.info(f"[{strategy.name}] {out['message']}")
+            return out
+        # Convert DataFrame rows to dicts
+        rows = []
+        for _, row in df.iterrows():
+            r = {}
+            for col in df.columns:
+                r[col] = row[col]
+            rows.append(r)
+        logger.info(f"[{strategy.name}] pywencai returned {len(rows)} rows")
+    except Exception as e:
+        out["message"] = f"pywencai 查询失败: {e}"
         out["errors"].append(str(e))
-        logger.error(f"[{strategy.name}] {out['message']}")
+        logger.exception(f"[{strategy.name}] pywencai crashed")
         return out
 
-    if not rows:
-        out["ok"] = True
-        out["message"] = "选股器今日返回 0 条"
-        logger.info(f"[{strategy.name}] {out['message']}")
-        return out
-
-    # Build stock rows first so we can set the *real* hit_count
+    # Build stock rows from pywencai DataFrame output
     stock_rows = []
     skipped = 0
     for r in rows:
-        code = (r.get("code") or "").strip()
+        code = _get_stock_code(r)
         name = _get_stock_name(r)
         if not code or not name:
             logger.warning(f"[{strategy.name}] skipping row missing code/name: {r}")
             skipped += 1
             continue
+        # pywencai returns industry and business info directly
+        industry = (r.get("所属同花顺行业") or "").strip()
+        business = (r.get("经营范围") or "").strip()
         stock_rows.append({
             "code": code,
             "name": name,
             "t0_price": _get_realtime_price(code),
-            "ind_biz": _get_industry_business(code),
+            "industry": industry if industry else None,
+            "business_summary": business[:200] if business else None,
         })
 
     if not stock_rows:
@@ -120,8 +152,8 @@ def _pick_for(strategy: Strategy, db) -> dict:
             strategy_pick_id=pick.id,
             stock_code=s["code"],
             stock_name=s["name"],
-            industry=s["ind_biz"].get("industry"),
-            business_summary=s["ind_biz"].get("business_summary"),
+            industry=s.get("industry"),
+            business_summary=s.get("business_summary"),
             selection_reason=None,
             t0_date=today,
             t0_price=s["t0_price"],

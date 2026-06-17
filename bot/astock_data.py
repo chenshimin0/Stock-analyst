@@ -132,18 +132,21 @@ def get_kline_mootdx(code: str, count: int = 120) -> list:
     try:
         from mootdx.quotes import Quotes
         client = Quotes.factory(market="std")
-        market_code = 1 if code.startswith("6") else 0
         bars = client.bars(symbol=code, category=4, offset=count)
         if bars is None or len(bars) == 0:
             return []
+        # mootdx returns a pandas DataFrame; convert to list of dicts
+        import pandas as pd
+        if isinstance(bars, pd.DataFrame):
+            bars = bars.to_dict("records")
         return [
             {
-                "date": str(b.get("datetime", ""))[:10],
-                "open": float(b.get("open", 0)),
-                "high": float(b.get("high", 0)),
-                "low": float(b.get("low", 0)),
-                "close": float(b.get("close", 0)),
-                "volume": float(b.get("vol", 0)),
+                "date": str(b.get("datetime", "") if isinstance(b, dict) else getattr(b, "datetime", ""))[:10],
+                "open": float(b.get("open", 0) if isinstance(b, dict) else getattr(b, "open", 0)),
+                "high": float(b.get("high", 0) if isinstance(b, dict) else getattr(b, "high", 0)),
+                "low": float(b.get("low", 0) if isinstance(b, dict) else getattr(b, "low", 0)),
+                "close": float(b.get("close", 0) if isinstance(b, dict) else getattr(b, "close", 0)),
+                "volume": float(b.get("vol", 0) if isinstance(b, dict) else getattr(b, "vol", 0)),
             }
             for b in bars
         ]

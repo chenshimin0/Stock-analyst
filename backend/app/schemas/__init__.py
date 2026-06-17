@@ -153,6 +153,9 @@ class StrategyStockMetric(BaseModel):
     selection_reason: Optional[str] = None
     t0_date: date
     t0_price: Optional[float] = None
+    t1_date: Optional[date] = None
+    t1_price: Optional[float] = None
+    t1_pct: Optional[float] = None
     t3_date: Optional[date] = None
     t3_price: Optional[float] = None
     t3_pct: Optional[float] = None
@@ -179,6 +182,7 @@ class StrategyPickListItem(BaseModel):
     query_text: str = ""
     strategy_name: str = ""
     stocks_preview: list[StrategyStockMetric] = []
+    avg_t1_pct: Optional[float] = None
     avg_t3_pct: Optional[float] = None
     avg_t7_pct: Optional[float] = None
     avg_t15_pct: Optional[float] = None
@@ -197,6 +201,7 @@ class StrategyPickDetail(BaseModel):
     archived_at: Optional[datetime] = None
     query_text: str = ""
     strategy_name: str = ""
+    avg_t1_pct: Optional[float] = None
     avg_t3_pct: Optional[float] = None
     avg_t7_pct: Optional[float] = None
     avg_t15_pct: Optional[float] = None

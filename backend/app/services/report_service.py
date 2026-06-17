@@ -228,34 +228,24 @@ class ReportService:
 
     @staticmethod
     async def refresh_adjusted_prices(db: Session) -> dict:
-        """Re-query 前复权 close prices for all reports and store them.
+        """Refresh report-date closing prices for all reports.
 
-        Fetches K-line data once per stock, then looks up each report date.
+        Fetches the close price (前复权) on each report's date and stores
+        it as price_at_report (used as baseline for win-rate calculation).
+        Handles weekends / holidays by falling back to the nearest prior
+        trading day.
         """
         reports = db.query(Report).all()
         if not reports:
             return {"updated": 0}
 
-        # Group by stock code
-        by_code: dict[str, list] = {}
-        for r in reports:
-            by_code.setdefault(r.stock_code, []).append(r)
-
         updated = 0
-        for code, stock_reports in by_code.items():
-            kline_data = await PriceService._fetch_kline_data(code)
-            if not kline_data:
-                continue
-
-            for r in stock_reports:
-                target = str(r.report_date).replace("-", "")
-                price = PriceService._lookup_kline_close(kline_data, target)
-                if price and price > 0:
-                    r.adjusted_price_at_report = price
-                    updated += 1
-
-        db.commit()
-        return {"updated": updated}
+        for r in reports:
+            target = str(r.report_date).replace("-", "")
+            price = await PriceService.get_historical_price(r.stock_code, target)
+            if price and price > 0:
+                r.price_at_report = price
+                updated += 1
 
         db.commit()
         return {"updated": updated}
@@ -264,18 +254,17 @@ class ReportService:
     async def get_all_reports_winrates(db: Session) -> list[dict]:
         """Return all reports with their win rate data as a flat list.
 
-        Reads from cached WinRate table — does NOT recompute. The /winrate
-        endpoint per report is the recompute trigger. This keeps the list
-        endpoint cheap so the dashboard can poll without hanging the server.
+        Reads from WinRate table, auto-calculates any missing periods where
+        the target date has already passed (e.g. weekends were skipped before).
         """
         from app.models import WinRate
         from app.config import WIN_RATE_PERIODS
-        from datetime import timedelta
+        from datetime import date, timedelta
 
+        today = date.today()
         reports = db.query(Report).order_by(Report.created_at.desc()).all()
         results = []
         for r in reports:
-            # Read cached rows for this report
             wr_rows = db.query(WinRate).filter(WinRate.report_id == r.id).all()
             by_period = {wr.period_days: wr for wr in wr_rows}
             periods_out = []
@@ -290,12 +279,36 @@ class ReportService:
                         "change_pct": wr.change_pct,
                         "target_date": str(target_date),
                     })
+                elif target_date <= today and r.price_at_report and r.price_at_report > 0:
+                    # Auto-calculate missing period (target date has passed)
+                    price = await PriceService.get_historical_price(
+                        r.stock_code, target_date.strftime("%Y%m%d"))
+                    if price is not None:
+                        is_win = price > r.price_at_report
+                        change_pct = round(
+                            (price - r.price_at_report) / r.price_at_report * 100, 2)
+                        db.add(WinRate(
+                            report_id=r.id, period_days=pd,
+                            is_win=is_win, price_at_period=price,
+                            change_pct=change_pct))
+                        db.commit()
+                        periods_out.append({
+                            "period_days": pd,
+                            "is_win": is_win,
+                            "price_at_period": price,
+                            "change_pct": change_pct,
+                            "target_date": str(target_date),
+                        })
+                    else:
+                        periods_out.append({
+                            "period_days": pd, "is_win": None,
+                            "price_at_period": None, "change_pct": None,
+                            "target_date": str(target_date),
+                        })
                 else:
                     periods_out.append({
-                        "period_days": pd,
-                        "is_win": None,
-                        "price_at_period": None,
-                        "change_pct": None,
+                        "period_days": pd, "is_win": None,
+                        "price_at_period": None, "change_pct": None,
                         "target_date": str(target_date),
                     })
             results.append({

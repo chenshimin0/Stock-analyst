@@ -123,8 +123,10 @@ export default function WinRateAnalysis() {
                     if (!p) return <td key={days}>-</td>;
                     if (p.is_win === null) return <td key={days} style={{color:'var(--text-muted)'}}>待定</td>;
                     return (
-                      <td key={days} style={{color: p.is_win ? 'var(--green)' : 'var(--red)'}}>
-                        {p.is_win ? '+' : ''}{p.change_pct}%
+                      <td key={days}>
+                        <span className={"win-pct " + (p.is_win ? "win-pos" : "win-neg")}>
+                          {p.is_win ? '+' : ''}{p.change_pct}%
+                        </span>
                       </td>
                     );
                   })}

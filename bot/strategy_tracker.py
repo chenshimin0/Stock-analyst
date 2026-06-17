@@ -28,7 +28,7 @@ from sector_tracker import (  # noqa: E402
 
 logger = logging.getLogger("strategy_tracker")
 
-MILESTONES = (3, 7, 15, 30)
+MILESTONES = (1, 3, 7, 15, 30)
 
 
 def _get_kline(stock_code: str) -> list:

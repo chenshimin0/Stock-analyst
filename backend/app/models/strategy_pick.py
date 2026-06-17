@@ -51,6 +51,9 @@ class StrategyPickStock(Base):
     t0_date = Column(Date, nullable=False)
     t0_price = Column(Float, nullable=True)
 
+    t1_date = Column(Date, nullable=True)
+    t1_price = Column(Float, nullable=True)
+    t1_pct = Column(Float, nullable=True)
     t3_date = Column(Date, nullable=True)
     t3_price = Column(Float, nullable=True)
     t3_pct = Column(Float, nullable=True)

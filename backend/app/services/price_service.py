@@ -207,17 +207,22 @@ class PriceService:
                 or []
             )
             target_str_dash = target_dt.strftime("%Y-%m-%d")
+            closest = None
             for bar in klines:
                 if len(bar) < 3:
                     continue
                 bar_date = str(bar[0])
                 if len(bar_date) >= 10:
                     bar_date = bar_date[:10]
+                try:
+                    bar_price = float(bar[2])
+                except (ValueError, TypeError):
+                    continue
                 if bar_date == target_str_dash:
-                    try:
-                        return float(bar[2])  # close price
-                    except (ValueError, TypeError):
-                        continue
-            return None
+                    return bar_price
+                # Fallback: nearest prior trading day
+                if bar_date < target_str_dash:
+                    closest = bar_price
+            return closest
         except Exception:
             return None
