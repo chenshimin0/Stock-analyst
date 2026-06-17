@@ -122,7 +122,9 @@ def _pick_for(strategy: Strategy, db) -> dict:
             skipped += 1
             continue
         # pywencai returns industry and business info directly
-        industry = (r.get("所属同花顺行业") or "").strip()
+        # Industry format: "电子-半导体-数字芯片设计" → take last segment
+        industry_full = (r.get("所属同花顺行业") or "").strip()
+        industry = industry_full.split("-")[-1] if industry_full else None
         business = (r.get("经营范围") or "").strip()
         stock_rows.append({
             "code": code,
