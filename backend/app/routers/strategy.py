@@ -127,3 +127,19 @@ def delete_strategy_pick(pick_id: int, db: Session = Depends(get_db)):
     db.delete(p)
     db.commit()
     return {"detail": "deleted", "id": pick_id}
+
+
+@router.delete("/stock/{stock_id}")
+def delete_pick_stock(stock_id: int, db: Session = Depends(get_db)):
+    """Delete a single stock row from a strategy pick batch."""
+    s = db.query(StrategyPickStock).filter(StrategyPickStock.id == stock_id).first()
+    if not s:
+        raise HTTPException(status_code=404, detail="Stock not found")
+    pick_id = s.strategy_pick_id
+    db.delete(s)
+    # Decrement hit_count on the parent pick
+    pick = db.query(StrategyPick).filter(StrategyPick.id == pick_id).first()
+    if pick:
+        pick.hit_count = max(0, pick.hit_count - 1)
+    db.commit()
+    return {"detail": "deleted", "id": stock_id}

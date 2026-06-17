@@ -22,3 +22,8 @@ export async function deleteStrategyPick(id) {
   const res = await client.delete(`/strategy-picks/${id}`);
   return res.data;
 }
+
+export async function deleteStockRow(stockId) {
+  const res = await client.delete(`/strategy-picks/stock/${stockId}`);
+  return res.data;
+}

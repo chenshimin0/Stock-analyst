@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { getStrategyPick, archiveStrategyPick, deleteStrategyPick } from '../api/strategy.js';
+import { getStrategyPick, archiveStrategyPick, deleteStrategyPick, deleteStockRow } from '../api/strategy.js';
 
 export default function StrategyDetail() {
   const { id } = useParams();
@@ -21,6 +21,17 @@ export default function StrategyDetail() {
     if (!confirm(`确认归档批次 #${pick.id}？`)) return;
     await archiveStrategyPick(id);
     navigate('/strategy');
+  };
+
+  const handleDeleteStock = async (stockId, stockName) => {
+    if (!confirm(`确认从本批次中删除 ${stockName}？`)) return;
+    try {
+      await deleteStockRow(stockId);
+      // Refresh the page
+      window.location.reload();
+    } catch (e) {
+      alert('删除失败：' + e.message);
+    }
   };
 
   const handleDelete = async () => {
@@ -76,6 +87,7 @@ export default function StrategyDetail() {
               <th style={th}>T+7</th>
               <th style={th}>T+15</th>
               <th style={{...th, borderRadius: '0 8px 0 0'}}>T+30</th>
+              <th style={{...th, background: 'transparent', width: 40}}></th>
             </tr>
           </thead>
           <tbody>
@@ -101,6 +113,17 @@ export default function StrategyDetail() {
                 <td style={td}><Pct value={s.t7_pct} sub={s.t7_date} /></td>
                 <td style={td}><Pct value={s.t15_pct} sub={s.t15_date} /></td>
                 <td style={td}><Pct value={s.t30_pct} sub={s.t30_date} /></td>
+                <td style={{...td, padding: '4px'}}>
+                  <button
+                    onClick={() => handleDeleteStock(s.id, s.stock_name)}
+                    title="从批次中删除该股票"
+                    style={{
+                      background: 'rgba(239,68,68,0.12)', color: '#ef4444',
+                      border: '1px solid rgba(239,68,68,0.3)', borderRadius: 4,
+                      cursor: 'pointer', fontSize: 12, padding: '3px 6px',
+                    }}
+                  >✕</button>
+                </td>
               </tr>
             ))}
           </tbody>
