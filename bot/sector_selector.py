@@ -211,11 +211,6 @@ def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
     """
     if not candidates:
         return f"""你是一位资深A股产业研究员。用户向你咨询「{concept_name}」概念板块，请基于你的专业知识推荐 3 只最相关的A股股票。
-
-## 核心原则
-- 如果「{concept_name}」过于细分，没有公司精确匹配，**必须退而求其次**，往上游原材料/下游应用方向寻找产业链上最接近的龙头。
-- **绝不返回 error**。即使只能找到间接相关的也推荐，在 reason 中说明关联逻辑。
-
 ## 选股标准
 - 沪深主板（60/00开头），排除 300/688/8 开头，非 ST
 - 行业龙头优先
@@ -223,7 +218,7 @@ def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
 
 ## 输出格式（严格 JSON，无其他文字）
 {{"picks":[
-  {{"code":"6位代码","name":"股票简称","reason":"产业链位置（上游/中游/下游）+ 龙头证据 + 与「{concept_name}」的关联逻辑（30-60字）"}}
+  {{"code":"6位代码","name":"股票简称","reason":"产业链环节 + 龙头证据 + 与「{concept_name}」的关联逻辑（30-60字）"}}
 ]}}
 **必须恰好 3 只。**
 """
@@ -231,30 +226,22 @@ def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
         f"| {c['code']} | {c['name']} | {c['mcap_yi']:.0f} | {c['pe_ttm']:.1f} |"
         for c in candidates
     )
-    return f"""请从下方「{concept_name}」相关 A 股候选池中，挑选 **3 只** 股票。
+    return f"""你是一位资深A股产业研究员。用户向你咨询「{concept_name}」概念板块，请基于你的专业知识推荐 3 只最相关的A股股票。
+## 选股标准
+- 沪深主板（60/00开头），排除 300/688/8 开头，非 ST
+- 行业龙头优先
+- 产业链上下游均算关联
 
-**硬性条件**：
-1. 沪深主板上市（6 字头沪市主板、0 字头深市主板），排除 300/688/8 字头
-2. 非 ST
-3. **必须**与「{concept_name}」概念有真实业务关联
-
-**优先标准**：
-- 行业龙头地位
-- 主营产品直接覆盖「{concept_name}」相关产品/技术
-
-（市值、PE、分红记录仅供参考，不作为硬性门槛）
-
-**候选池**（已通过 API 实时拉取 {datetime.now().strftime("%Y-%m-%d")}）：
+**候选池**（已通过 API 实时拉取）：
 
 | 代码 | 名称 | 市值(亿) | PE-TTM |
 {rows}
 
-**输出格式（严格 JSON，无其他文字）**：
-{{"picks": [
-  {{"code": "600378", "name": "昊华科技", "reason": "PVDF 中试线 + 氟橡胶龙头"}},
-  {{"code": "...", "name": "...", "reason": "..."}},
-  {{"code": "...", "name": "...", "reason": "..."}}
+## 输出格式（严格 JSON，无其他文字）
+{{"picks":[
+  {{"code":"6位代码","name":"股票简称","reason":"产业链环节 + 龙头证据 + 与「{concept_name}」的关联逻辑（30-60字）"}}
 ]}}
+**必须恰好 3 只。**
 """
 
 
