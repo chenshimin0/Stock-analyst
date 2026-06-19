@@ -10,7 +10,7 @@ restart the scheduler. (A future API endpoint could call reload() directly.)
 import logging
 import sys
 import traceback
-from datetime import datetime
+from datetime import datetime, date, timedelta
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
@@ -31,8 +31,35 @@ logging.basicConfig(
 )
 logger = logging.getLogger("strategy_scheduler")
 
+# ============================================================
+# Trading day check
+# ============================================================
+_xshg_calendar = None
+
+def _get_calendar():
+    """Lazy-load XSHG calendar (Shanghai Stock Exchange)."""
+    global _xshg_calendar
+    if _xshg_calendar is None:
+        import exchange_calendars as xcals
+        _xshg_calendar = xcals.get_calendar("XSHG")
+    return _xshg_calendar
+
+def is_trading_day(d: date = None) -> bool:
+    """Check if given date (default today) is an A-share trading day."""
+    if d is None:
+        d = date.today()
+    try:
+        return _get_calendar().is_session(d.isoformat())
+    except Exception as e:
+        logger.warning(f"Trading calendar check failed: {e}, falling back to weekday check")
+        # Fallback: Mon-Fri only
+        return d.weekday() < 5
+
 
 def _safe_pick_one(sid: int) -> None:
+    if not is_trading_day():
+        logger.info(f"strategy #{sid} pick skipped — not a trading day ({date.today()})")
+        return
     try:
         r = run_one_strategy(sid)
         logger.info(f"strategy #{sid} pick -> ok={r['ok']} batch={r.get('batch_id')} hits={r.get('hit_count')}")
@@ -41,6 +68,9 @@ def _safe_pick_one(sid: int) -> None:
 
 
 def _safe_track() -> None:
+    if not is_trading_day():
+        logger.info(f"track_all_picks skipped — not a trading day ({date.today()})")
+        return
     try:
         r = track_all_picks()
         logger.info(f"track_all_picks -> {r}")

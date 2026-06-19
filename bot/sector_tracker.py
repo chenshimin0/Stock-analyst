@@ -67,19 +67,23 @@ def calc_t_n_metrics(t0_price, t_n_price) -> Optional[float]:
     return round((t_n_price - t0_price) / t0_price * 100, 2)
 
 
+_xshg_calendar = None
+
+def _get_xshg_calendar():
+    """Lazy-load XSHG calendar for trading-day checks."""
+    global _xshg_calendar
+    if _xshg_calendar is None:
+        import exchange_calendars as xcals
+        _xshg_calendar = xcals.get_calendar("XSHG")
+    return _xshg_calendar
+
 def is_trading_day_today() -> bool:
-    """Heuristic: try to get today's K-line. If no data, not a trading day."""
-    from astock_data import get_quote
-    # Tencent quote works on every day; for actual trading-day check, use K-line
+    """Check if today is an A-share trading day (XSHG calendar)."""
     try:
-        bars = get_kline("000001", count=5)  # SSE index as proxy
-        if not bars:
-            return False
-        today_str = date.today().strftime("%Y-%m-%d")
-        return any((b.get("date") or b.get("day", ""))[:10] == today_str for b in bars)
+        return _get_xshg_calendar().is_session(date.today().isoformat())
     except Exception as e:
-        logger.warning(f"is_trading_day_today check failed: {e}")
-        return False
+        logger.warning(f"is_trading_day_today check failed: {e}, fallback to weekday check")
+        return date.today().weekday() < 5
 
 
 def get_t_n_data_for_stock(
