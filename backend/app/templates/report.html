@@ -794,30 +794,30 @@ tr:hover{background:#f5f9ff}
         <thead>
           <tr>
             <th>日期</th>
-            <th class="text-right">涨跌幅</th>
-            <th class="text-right">主力净流入(万)</th>
-            <th class="text-right">主力净占比</th>
-            <th class="text-right">超大单(万)</th>
-            <th class="text-right">大单(万)</th>
+            <th class="text-center">涨跌幅</th>
+            <th class="text-center">主力净流入(万)</th>
+            <th class="text-center">主力净占比</th>
+            <th class="text-center">超大单(万)</th>
+            <th class="text-center">大单(万)</th>
           </tr>
         </thead>
         <tbody>
           {% for d in ffr %}
           <tr{% if loop.index <= 3 %} style="background:#f0f4ff"{% endif %}>
             <td>{% if loop.index == 1 %}📌 {% endif %}{{ d.date or '' }}</td>
-            <td class="text-right {% if d.change_pct > 0 %}up{% elif d.change_pct < 0 %}down{% endif %}" style="font-weight:700">
+            <td class="text-center {% if d.change_pct > 0 %}up{% elif d.change_pct < 0 %}down{% endif %}" style="font-weight:700">
               {% if d.change_pct > 0 %}+{% endif %}{{ "%.2f"|format(d.change_pct) }}%
             </td>
-            <td class="text-right {% if d.main_net > 0 %}up{% elif d.main_net < 0 %}down{% endif %}" style="font-weight:700">
+            <td class="text-center {% if d.main_net > 0 %}up{% elif d.main_net < 0 %}down{% endif %}" style="font-weight:700">
               {% if d.main_net > 0 %}+{% endif %}{{ "%.2f"|format(d.main_net / 10000) }}
             </td>
-            <td class="text-right {% if d.main_pct > 0 %}up{% elif d.main_pct < 0 %}down{% endif %}">
+            <td class="text-center {% if d.main_pct > 0 %}up{% elif d.main_pct < 0 %}down{% endif %}">
               {% if d.main_pct > 0 %}+{% endif %}{{ "%.2f"|format(d.main_pct) }}%
             </td>
-            <td class="text-right {% if d.super_large_net > 0 %}up{% elif d.super_large_net < 0 %}down{% endif %}">
+            <td class="text-center {% if d.super_large_net > 0 %}up{% elif d.super_large_net < 0 %}down{% endif %}">
               {% if d.super_large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.super_large_net / 10000) }}
             </td>
-            <td class="text-right {% if d.large_net > 0 %}up{% elif d.large_net < 0 %}down{% endif %}">
+            <td class="text-center {% if d.large_net > 0 %}up{% elif d.large_net < 0 %}down{% endif %}">
               {% if d.large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.large_net / 10000) }}
             </td>
           </tr>
