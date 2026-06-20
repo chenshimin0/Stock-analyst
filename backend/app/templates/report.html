@@ -746,6 +746,7 @@ tr:hover{background:#f5f9ff}
   {# === 近 3 日 === #}
   <div class="card" style="margin-bottom:12px">
     <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 3 日大单净流入（主力 = 超大单+大单）</div>
+    {% if ffr %}
     {% if ffr_3d %}
     {% set total_3d = ffr_3d | sum(attribute='main_net') %}
     {% set in_3d = ffr_3d | selectattr('main_net', 'gt', 0) | list | length %}
@@ -780,6 +781,7 @@ tr:hover{background:#f5f9ff}
             <th class="text-right">主力净占比</th>
             <th class="text-right">超大单(万)</th>
             <th class="text-right">大单(万)</th>
+            <th class="text-right">涨跌幅</th>
           </tr>
         </thead>
         <tbody>
@@ -798,6 +800,9 @@ tr:hover{background:#f5f9ff}
             <td class="text-right {% if d.large_net > 0 %}up{% elif d.large_net < 0 %}down{% endif %}">
               {% if d.large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.large_net / 10000) }}
             </td>
+            <td class="text-right {% if d.change_pct > 0 %}up{% elif d.change_pct < 0 %}down{% endif %}">
+              {% if d.change_pct > 0 %}+{% endif %}{{ "%.2f"|format(d.change_pct) }}%
+            </td>
           </tr>
           {% endfor %}
         </tbody>
@@ -809,7 +814,6 @@ tr:hover{background:#f5f9ff}
   {# === 近 8 日 === #}
   <div class="card" style="margin-bottom:12px">
     <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 8 日大单净流入（主力 = 超大单+大单）</div>
-    {% if ffr %}
     {% set total_8d = ffr | sum(attribute='main_net') %}
     {% set in_8d = ffr | selectattr('main_net', 'gt', 0) | list | length %}
     {% set out_8d = ffr | selectattr('main_net', 'lt', 0) | list | length %}
@@ -843,6 +847,7 @@ tr:hover{background:#f5f9ff}
             <th class="text-right">主力净占比</th>
             <th class="text-right">超大单(万)</th>
             <th class="text-right">大单(万)</th>
+            <th class="text-right">涨跌幅</th>
           </tr>
         </thead>
         <tbody>
@@ -861,12 +866,12 @@ tr:hover{background:#f5f9ff}
             <td class="text-right {% if d.large_net > 0 %}up{% elif d.large_net < 0 %}down{% endif %}">
               {% if d.large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.large_net / 10000) }}
             </td>
-          </tr>
-          {% endfor %}
+            <td class="text-right {% if d.change_pct > 0 %}up{% elif d.change_pct < 0 %}down{% endif %}">
+              {% if d.change_pct > 0 %}+{% endif %}{{ "%.2f"|format(d.change_pct) }}%
+            </td>
         </tbody>
       </table>
     </div>
-    {% endif %}
   </div>
     {% else %}
     <div class="insight-box yellow" style="margin:0">
