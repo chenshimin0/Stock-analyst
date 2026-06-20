@@ -260,71 +260,106 @@ def _fund_flow_from_akshare(code: str, days: int = 3) -> list:
 def _fund_flow_from_pywencai(code: str, days: int = 3) -> list:
     """Get fund flow via pywencai DDE query.
 
+    pywencai returns a dict with keys like 'bar3' (大单净额 DataFrame)
+    and 'dde大单净额相关数据' (detailed DDE DataFrame).
+
     Returns list of {date, main_net, main_pct, super_large_net, large_net,
                      medium_net, retail_net} dicts, or [] on failure.
     """
     try:
         import pywencai
-        # Query: DDE large order data for last N days
+        import pandas as pd
+
         result = pywencai.get(query=f"{code} 大单净流入 最近{days}日", loop=True)
-        if isinstance(result, dict):
-            # pywencai may return {code_str: DataFrame} or {0: DataFrame}
+        if not isinstance(result, dict):
+            return []
+
+        # Find the 'bar3' DataFrame — contains 大单净额 daily data
+        df_bar = None
+        df_dde = None
+
+        # Direct key: 'bar3'
+        bar3 = result.get("bar3")
+        if hasattr(bar3, "columns") and bar3 is not None and not bar3.empty:
+            df_bar = bar3
+
+        # Nested: '近30日大单净额' -> 'bar3'
+        if df_bar is None:
+            nested = result.get("近30日大单净额", {})
+            if isinstance(nested, dict):
+                nested_bar = nested.get("bar3")
+                if hasattr(nested_bar, "columns") and nested_bar is not None and not nested_bar.empty:
+                    df_bar = nested_bar
+
+        # DDE detail DataFrame
+        dde = result.get("dde大单净额相关数据")
+        if hasattr(dde, "columns") and dde is not None and not dde.empty:
+            df_dde = dde
+
+        if df_bar is None and df_dde is None:
+            # Last resort: scan all values for any DataFrame
             for v in result.values():
-                if hasattr(v, "to_dict"):
-                    df = v
+                if hasattr(v, "columns") and v is not None and not v.empty:
+                    df_bar = v
                     break
-            else:
+            if df_bar is None:
+                logger.debug("pywencai: no DataFrame found in result")
                 return []
-        elif hasattr(result, "to_dict"):
-            df = result
-        else:
-            return []
 
-        if df is None or df.empty:
-            return []
+        # Use bar3 as primary source, dde as enrichment
+        primary = df_bar if df_bar is not None else df_dde
 
-        # Map DDE columns
+        # Map columns with Chinese names from pywencai
         col_map = {}
-        for c in df.columns:
-            cl = str(c).lower().replace(" ", "")
-            if "日期" in c or "date" in cl:
+        for c in primary.columns:
+            if c in ("时间", "日期"):
                 col_map["date"] = c
-            elif "大单净额" in c and "超大" not in c:
+            elif c == "大单净额":
                 col_map["large_net"] = c
-            elif "超大单净额" in c:
-                col_map["super_large_net"] = c
-            elif "dde大单净量" in cl:
-                col_map["large_net"] = c
-            elif "主力净流入" in c:
-                col_map["main_net"] = c
-            elif "中单" in c and "净" in c:
-                col_map["medium_net"] = c
-            elif "小单" in c or "散户" in c:
-                col_map["retail_net"] = c
+            elif c == "dde大单净额":
+                col_map["dde_large_net"] = c
+            elif c == "dde大单买入金额":
+                col_map["large_buy"] = c
+            elif c == "dde大单卖出金额":
+                col_map["large_sell"] = c
+            elif c == "dde大单净量":
+                col_map["large_net_vol"] = c
 
         if "date" not in col_map:
-            logger.debug(f"pywencai fund flow: unexpected columns {list(df.columns)[:8]}")
+            logger.debug(f"pywencai fund flow: no date column in {list(primary.columns)[:8]}")
             return []
 
-        import pandas as pd
+        # Sort by date, take last N days
+        date_col = col_map["date"]
+        try:
+            primary[date_col] = pd.to_datetime(primary[date_col])
+            primary = primary.sort_values(date_col)
+        except Exception:
+            pass
+
         out = []
-        for _, row in df.tail(days).iterrows():
-            entry = {"date": str(row[col_map["date"]])[:10]}
-            for key, col in col_map.items():
-                if key == "date":
-                    continue
-                try:
-                    entry[key] = float(row[col]) if pd.notna(row[col]) else 0
-                except (ValueError, TypeError):
-                    entry[key] = 0
-            # Fill missing keys; derive main_net from super_large+large if absent
-            entry.setdefault("main_net", entry.get("super_large_net", 0) + entry.get("large_net", 0))
-            entry.setdefault("main_pct", 0)
-            entry.setdefault("super_large_net", 0)
-            entry.setdefault("large_net", 0)
-            entry.setdefault("medium_net", 0)
-            entry.setdefault("retail_net", 0)
-            out.append(entry)
+        rows = primary.tail(days)
+        for _, row in rows.iterrows():
+            date_val = str(row[date_col])[:10]
+            large_net = 0
+
+            # bar3 format: 大单净额 is the primary large-order net in yuan
+            if "large_net" in col_map:
+                large_net = float(row[col_map["large_net"]]) if pd.notna(row[col_map["large_net"]]) else 0
+            # dde format: dde大单净额 in yuan
+            elif "dde_large_net" in col_map:
+                large_net = float(row[col_map["dde_large_net"]]) if pd.notna(row[col_map["dde_large_net"]]) else 0
+
+            out.append({
+                "date": date_val,
+                "main_net": large_net,          # pywencai only has large order, use as main
+                "main_pct": 0,                   # not available from pywencai
+                "super_large_net": 0,            # not available separately
+                "large_net": large_net,
+                "medium_net": 0,                 # not available
+                "retail_net": 0,                 # not available
+            })
+
         return out
     except Exception as e:
         logger.debug(f"pywencai fund flow failed for {code}: {e}")
@@ -342,11 +377,11 @@ def get_fund_flow_recent(code: str, days: int = 3) -> list:
     Returns list of {date, main_net, main_pct, super_large_net, large_net,
                      medium_net, retail_net} dicts (oldest first), or [] on failure.
     """
-    # Source 1: EastMoney push2his (fastest, but blocked from cloud IPs)
+    # Source 1: EastMoney push2his (klt=101, 15-field format, blocked from cloud IPs)
     secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
     url = (
         f"https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?"
-        f"lmt={days}&klt=1&secid={secid}&fields1=f1,f2,f3,f7&fields2="
+        f"lmt={days}&klt=101&secid={secid}&fields1=f1,f2,f3,f7&fields2="
         f"f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
     )
     try:
@@ -358,16 +393,25 @@ def get_fund_flow_recent(code: str, days: int = 3) -> list:
             out = []
             for line in klines[-days:]:
                 p = line.split(",")
-                if len(p) < 7:
+                if len(p) < 11:
                     continue
+                # klt=101 field layout (15 cols):
+                # 0=date 1=主力 2=小单 3=中单 4=大单 5=超大单
+                # 6=主力% 7=小单% 8=中单% 9=大单% 10=超大单%
                 out.append({
                     "date": p[0],
-                    "main_net": float(p[4]) if p[4] != "-" else 0,
-                    "main_pct": float(p[5]) if p[5] != "-" else 0,
-                    "super_large_net": float(p[6]) if p[6] != "-" else 0,
-                    "large_net": float(p[7]) if len(p) > 7 and p[7] != "-" else 0,
-                    "medium_net": float(p[8]) if len(p) > 8 and p[8] != "-" else 0,
-                    "retail_net": float(p[9]) if len(p) > 9 and p[9] != "-" else 0,
+                    "main_net": float(p[1]) if p[1] != "-" else 0,
+                    "main_pct": float(p[6]) if len(p) > 6 and p[6] != "-" else 0,
+                    "super_large_net": float(p[5]) if p[5] != "-" else 0,
+                    "super_large_pct": float(p[10]) if len(p) > 10 and p[10] != "-" else 0,
+                    "large_net": float(p[4]) if p[4] != "-" else 0,
+                    "large_pct": float(p[9]) if len(p) > 9 and p[9] != "-" else 0,
+                    "medium_net": float(p[3]) if p[3] != "-" else 0,
+                    "medium_pct": float(p[8]) if len(p) > 8 and p[8] != "-" else 0,
+                    "retail_net": float(p[2]) if p[2] != "-" else 0,
+                    "retail_pct": float(p[7]) if len(p) > 7 and p[7] != "-" else 0,
+                    "close": float(p[11]) if len(p) > 11 and p[11] != "-" else 0,
+                    "change_pct": float(p[12]) if len(p) > 12 and p[12] != "-" else 0,
                 })
             if out:
                 return out
