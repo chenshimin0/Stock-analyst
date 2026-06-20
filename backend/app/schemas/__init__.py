@@ -27,6 +27,7 @@ class ReportCreate(BaseModel):
     financial_data_raw: Optional[dict] = None
     peer_comparison_raw: Optional[dict] = None
     revenue_composition_raw: Optional[dict] = None
+    fund_flow_recent: Optional[list] = None
     adjusted_price_at_report: Optional[float] = None
 
 

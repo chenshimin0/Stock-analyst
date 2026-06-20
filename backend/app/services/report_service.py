@@ -118,6 +118,8 @@ class ReportService:
                 existing.peer_comparison_raw = data.peer_comparison_raw
             if data.revenue_composition_raw is not None:
                 existing.revenue_composition_raw = data.revenue_composition_raw
+            if data.fund_flow_recent is not None:
+                existing.fund_flow_recent = data.fund_flow_recent
             db.commit()
             db.refresh(existing)
             return existing
@@ -147,6 +149,7 @@ class ReportService:
             financial_data_raw=data.financial_data_raw,
             peer_comparison_raw=data.peer_comparison_raw,
             revenue_composition_raw=data.revenue_composition_raw,
+            fund_flow_recent=data.fund_flow_recent,
         )
         db.add(report)
         db.commit()
