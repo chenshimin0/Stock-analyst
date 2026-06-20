@@ -202,12 +202,147 @@ def get_fund_flow(code: str) -> dict:
         return {}
 
 
+def _fund_flow_from_akshare(code: str, days: int = 3) -> list:
+    """Get fund flow via akshare (handles hexin-v internally).
+
+    Returns list of {date, main_net, main_pct, super_large_net, large_net,
+                     medium_net, retail_net} dicts, or [] on failure.
+    """
+    try:
+        import akshare as ak
+        market = "sh" if code.startswith(("6", "9")) else "sz"
+        df = ak.stock_individual_fund_flow(stock=code, market=market)
+        if df is None or df.empty:
+            return []
+        # Normalize columns — akshare may return Chinese or English col names
+        col_map = {}
+        for c in df.columns:
+            cl = str(c).lower().replace(" ", "")
+            if "日期" in c or "date" in cl:
+                col_map["date"] = c
+            elif "主力净流入" in c or ("main" in cl and "net" in cl and "pct" not in cl):
+                col_map["main_net"] = c
+            elif "主力净占比" in c or "main_pct" in cl:
+                col_map["main_pct"] = c
+            elif "超大单" in c and "净" in c:
+                col_map["super_large_net"] = c
+            elif "大单" in c and "净" in c:
+                col_map["large_net"] = c
+            elif "中单" in c and "净" in c:
+                col_map["medium_net"] = c
+            elif "小单" in c or "散户" in c:
+                col_map["retail_net"] = c
+
+        if "date" not in col_map:
+            logger.debug(f"akshare fund flow: unexpected columns {list(df.columns)[:8]}")
+            return []
+
+        out = []
+        for _, row in df.tail(days).iterrows():
+            entry = {"date": str(row[col_map["date"]])[:10]}
+            for key, col in col_map.items():
+                if key == "date":
+                    continue
+                try:
+                    entry[key] = float(row[col]) if pd.notna(row[col]) else 0
+                except (ValueError, TypeError):
+                    entry[key] = 0
+            # Ensure all expected keys exist
+            for k in ("main_net", "main_pct", "super_large_net", "large_net", "medium_net", "retail_net"):
+                entry.setdefault(k, 0)
+            out.append(entry)
+        return out
+    except Exception as e:
+        logger.debug(f"akshare fund flow failed for {code}: {e}")
+        return []
+
+
+def _fund_flow_from_pywencai(code: str, days: int = 3) -> list:
+    """Get fund flow via pywencai DDE query.
+
+    Returns list of {date, main_net, main_pct, super_large_net, large_net,
+                     medium_net, retail_net} dicts, or [] on failure.
+    """
+    try:
+        import pywencai
+        # Query: DDE large order data for last N days
+        result = pywencai.get(query=f"{code} 大单净流入 最近{days}日", loop=True)
+        if isinstance(result, dict):
+            # pywencai may return {code_str: DataFrame} or {0: DataFrame}
+            for v in result.values():
+                if hasattr(v, "to_dict"):
+                    df = v
+                    break
+            else:
+                return []
+        elif hasattr(result, "to_dict"):
+            df = result
+        else:
+            return []
+
+        if df is None or df.empty:
+            return []
+
+        # Map DDE columns
+        col_map = {}
+        for c in df.columns:
+            cl = str(c).lower().replace(" ", "")
+            if "日期" in c or "date" in cl:
+                col_map["date"] = c
+            elif "大单净额" in c and "超大" not in c:
+                col_map["large_net"] = c
+            elif "超大单净额" in c:
+                col_map["super_large_net"] = c
+            elif "dde大单净量" in cl:
+                col_map["large_net"] = c
+            elif "主力净流入" in c:
+                col_map["main_net"] = c
+            elif "中单" in c and "净" in c:
+                col_map["medium_net"] = c
+            elif "小单" in c or "散户" in c:
+                col_map["retail_net"] = c
+
+        if "date" not in col_map:
+            logger.debug(f"pywencai fund flow: unexpected columns {list(df.columns)[:8]}")
+            return []
+
+        import pandas as pd
+        out = []
+        for _, row in df.tail(days).iterrows():
+            entry = {"date": str(row[col_map["date"]])[:10]}
+            for key, col in col_map.items():
+                if key == "date":
+                    continue
+                try:
+                    entry[key] = float(row[col]) if pd.notna(row[col]) else 0
+                except (ValueError, TypeError):
+                    entry[key] = 0
+            # Fill missing keys; derive main_net from super_large+large if absent
+            entry.setdefault("main_net", entry.get("super_large_net", 0) + entry.get("large_net", 0))
+            entry.setdefault("main_pct", 0)
+            entry.setdefault("super_large_net", 0)
+            entry.setdefault("large_net", 0)
+            entry.setdefault("medium_net", 0)
+            entry.setdefault("retail_net", 0)
+            out.append(entry)
+        return out
+    except Exception as e:
+        logger.debug(f"pywencai fund flow failed for {code}: {e}")
+        return []
+
+
 def get_fund_flow_recent(code: str, days: int = 3) -> list:
-    """Get individual stock fund flow for recent N days.
+    """Get individual stock fund flow for recent N trading days.
+
+    Tries multiple data sources in order:
+    1. EastMoney push2his (direct HTTP — blocked on some cloud IPs)
+    2. akshare (handles 10jqka hexin-v decryption internally)
+    3. pywencai (iwencai DDE query)
 
     Returns list of {date, main_net, main_pct, super_large_net, large_net,
                      medium_net, retail_net} dicts (oldest first), or [] on failure.
     """
+    # Source 1: EastMoney push2his (fastest, but blocked from cloud IPs)
     secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
     url = (
         f"https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?"
@@ -219,26 +354,40 @@ def get_fund_flow_recent(code: str, days: int = 3) -> list:
         resp = urllib.request.urlopen(req, timeout=10)
         data = json.loads(resp.read())
         klines = data.get("data", {}).get("klines", [])
-        if not klines:
-            return []
-        out = []
-        for line in klines[-days:]:
-            p = line.split(",")
-            if len(p) < 7:
-                continue
-            out.append({
-                "date": p[0],
-                "main_net": float(p[4]) if p[4] != "-" else 0,
-                "main_pct": float(p[5]) if p[5] != "-" else 0,
-                "super_large_net": float(p[6]) if p[6] != "-" else 0,
-                "large_net": float(p[7]) if len(p) > 7 and p[7] != "-" else 0,
-                "medium_net": float(p[8]) if len(p) > 8 and p[8] != "-" else 0,
-                "retail_net": float(p[9]) if len(p) > 9 and p[9] != "-" else 0,
-            })
-        return out
+        if klines:
+            out = []
+            for line in klines[-days:]:
+                p = line.split(",")
+                if len(p) < 7:
+                    continue
+                out.append({
+                    "date": p[0],
+                    "main_net": float(p[4]) if p[4] != "-" else 0,
+                    "main_pct": float(p[5]) if p[5] != "-" else 0,
+                    "super_large_net": float(p[6]) if p[6] != "-" else 0,
+                    "large_net": float(p[7]) if len(p) > 7 and p[7] != "-" else 0,
+                    "medium_net": float(p[8]) if len(p) > 8 and p[8] != "-" else 0,
+                    "retail_net": float(p[9]) if len(p) > 9 and p[9] != "-" else 0,
+                })
+            if out:
+                return out
     except Exception as e:
-        logger.warning(f"Fund flow recent failed for {code}: {e}")
-        return []
+        logger.debug(f"push2his fund flow failed for {code}: {e}")
+
+    # Source 2: akshare -> 10jqka hexin-v
+    result = _fund_flow_from_akshare(code, days)
+    if result:
+        logger.info(f"Fund flow for {code} via akshare: {len(result)} days")
+        return result
+
+    # Source 3: pywencai DDE
+    result = _fund_flow_from_pywencai(code, days)
+    if result:
+        logger.info(f"Fund flow for {code} via pywencai: {len(result)} days")
+        return result
+
+    logger.warning(f"Fund flow recent failed for {code}: all sources exhausted")
+    return []
 
 
 def get_last_limit_up_date(code: str, lookback_days: int = 120) -> Optional[str]:

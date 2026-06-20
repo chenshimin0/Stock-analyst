@@ -118,8 +118,15 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                 last_limit_up_days_ago = None
     except Exception as e:
         logger.warning("Limit-up fetch failed for %s: %s", code, e)
-    # Note: fund_flow_recent is left empty because EastMoney push2 API is blocked from this server
+    # Fund flow recent: tries EastMoney push2 -> akshare -> pywencai
     fund_flow_recent = []
+    try:
+        from astock_data import get_fund_flow_recent
+        fund_flow_recent = get_fund_flow_recent(code, days=3)
+        if fund_flow_recent:
+            logger.info("Fund flow recent for %s: %d days fetched", code, len(fund_flow_recent))
+    except Exception as e:
+        logger.debug("Fund flow recent skipped for %s: %s", code, e)
     try:
         p = quote.get("price", 0)
         atr = ind.get("atr", 0)
