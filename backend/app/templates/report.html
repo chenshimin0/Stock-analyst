@@ -739,69 +739,101 @@ tr:hover{background:#f5f9ff}
 
 <!-- 4.5 资金面与涨停记录 -->
 {% set ffr = fund_flow_recent or [] %}
+{% set ffr_3d = ffr[:3] %}  {# data is sorted desc (newest first); first 3 = 近 3 日 #}
 <div class="section">
   <div class="section-title">💰 资金面与涨停记录</div>
 
   <div class="card" style="margin-bottom:12px">
     <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 3 日大单净流入（主力 = 超大单+大单）</div>
     {% if ffr %}
-    {% set total_main = ffr | sum(attribute='main_net') %}
+    {% set total_main = ffr_3d | sum(attribute='main_net') %}
     <div class="card-grid-3" style="margin-bottom:10px">
       <div>
         <div class="stat-label">近 3 日主力净流入合计</div>
-        {% set total_yi = total_main / 10000 %}
+        {% set total_yi = total_main / 100000000 %}
         <div class="stat-value {% if total_main > 0 %}up{% elif total_main < 0 %}down{% else %}blue{% endif %}">
           {% if total_main > 0 %}+{% endif %}{{ "%.2f"|format(total_yi) }}亿
         </div>
-        <div class="stat-sub">{{ "%.0f"|format(total_main) }} 万元</div>
+        <div class="stat-sub">{{ "%.0f"|format(total_main / 10000) }} 万元</div>
       </div>
       <div>
         <div class="stat-label">流入天数 / 流出天数</div>
-        {% set in_days = ffr | selectattr('main_net', 'gt', 0) | list | length %}
-        {% set out_days = ffr | selectattr('main_net', 'lt', 0) | list | length %}
+        {% set in_days = ffr_3d | selectattr('main_net', 'gt', 0) | list | length %}
+        {% set out_days = ffr_3d | selectattr('main_net', 'lt', 0) | list | length %}
         <div class="stat-value blue">{{ in_days }} 天 / {{ out_days }} 天</div>
         <div class="stat-sub">近 3 个交易日</div>
       </div>
       <div>
         <div class="stat-label">最近一日主力动向</div>
-        {% set last_day = ffr[-1] %}
+        {% set last_day = ffr[0] %}
         <div class="stat-value {% if last_day.main_net > 0 %}up{% elif last_day.main_net < 0 %}down{% else %}blue{% endif %}">
-          {% if last_day.main_net > 0 %}+{% endif %}{{ "%.2f"|format(last_day.main_net / 10000) }}亿
+          {% if last_day.main_net > 0 %}+{% endif %}{{ "%.2f"|format(last_day.main_net / 100000000) }}亿
         </div>
         <div class="stat-sub">{{ last_day.date or '' }}</div>
       </div>
     </div>
+    {# 近 3 日表格 #}
+    <div class="table-wrap" style="margin-bottom:14px">
+      <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th class="text-right">主力净流入(万)</th>
+            <th class="text-right">主力净占比</th>
+            <th class="text-right">超大单(万)</th>
+            <th class="text-right">大单(万)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in ffr_3d %}
+          <tr{% if loop.index == 1 %} style="border-left:3px solid #1565c0"{% endif %}>
+            <td>{% if loop.index == 1 %}📌 {% endif %}{{ d.date or '' }}</td>
+            <td class="text-right {% if d.main_net > 0 %}up{% elif d.main_net < 0 %}down{% endif %}" style="font-weight:700">
+              {% if d.main_net > 0 %}+{% endif %}{{ "%.2f"|format(d.main_net / 10000) }}
+            </td>
+            <td class="text-right {% if d.main_pct > 0 %}up{% elif d.main_pct < 0 %}down{% endif %}">
+              {% if d.main_pct > 0 %}+{% endif %}{{ "%.2f"|format(d.main_pct) }}%
+            </td>
+            <td class="text-right {% if d.super_large_net > 0 %}up{% elif d.super_large_net < 0 %}down{% endif %}">
+              {% if d.super_large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.super_large_net / 10000) }}
+            </td>
+            <td class="text-right {% if d.large_net > 0 %}up{% elif d.large_net < 0 %}down{% endif %}">
+              {% if d.large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.large_net / 10000) }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {# 近 8 日表格（含以上3日） #}
+    <div style="font-size:12px;font-weight:700;color:#888;margin-bottom:6px">📅 近 8 日资金流向明细</div>
     <div class="table-wrap" style="margin-bottom:0">
       <table>
         <thead>
           <tr>
             <th>日期</th>
             <th class="text-right">主力净流入(万)</th>
-            <th class="text-right">主力净流入占比</th>
+            <th class="text-right">主力净占比</th>
             <th class="text-right">超大单(万)</th>
             <th class="text-right">大单(万)</th>
-            <th class="text-right">中单(万)</th>
-            <th class="text-right">小单(万)</th>
           </tr>
         </thead>
         <tbody>
           {% for d in ffr %}
-          <tr>
+          <tr{% if loop.index <= 3 %} style="background:#f0f4ff"{% endif %}>
             <td>{{ d.date or '' }}</td>
             <td class="text-right {% if d.main_net > 0 %}up{% elif d.main_net < 0 %}down{% endif %}" style="font-weight:700">
-              {% if d.main_net > 0 %}+{% endif %}{{ "%.0f"|format(d.main_net) }}
+              {% if d.main_net > 0 %}+{% endif %}{{ "%.2f"|format(d.main_net / 10000) }}
             </td>
             <td class="text-right {% if d.main_pct > 0 %}up{% elif d.main_pct < 0 %}down{% endif %}">
               {% if d.main_pct > 0 %}+{% endif %}{{ "%.2f"|format(d.main_pct) }}%
             </td>
             <td class="text-right {% if d.super_large_net > 0 %}up{% elif d.super_large_net < 0 %}down{% endif %}">
-              {% if d.super_large_net > 0 %}+{% endif %}{{ "%.0f"|format(d.super_large_net) }}
+              {% if d.super_large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.super_large_net / 10000) }}
             </td>
             <td class="text-right {% if d.large_net > 0 %}up{% elif d.large_net < 0 %}down{% endif %}">
-              {% if d.large_net > 0 %}+{% endif %}{{ "%.0f"|format(d.large_net) }}
+              {% if d.large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.large_net / 10000) }}
             </td>
-            <td class="text-right">{{ "%.0f"|format(d.medium_net) }}</td>
-            <td class="text-right">{{ "%.0f"|format(d.retail_net) }}</td>
           </tr>
           {% endfor %}
         </tbody>
