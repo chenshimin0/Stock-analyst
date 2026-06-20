@@ -869,6 +869,8 @@ tr:hover{background:#f5f9ff}
             <td class="text-right {% if d.change_pct > 0 %}up{% elif d.change_pct < 0 %}down{% endif %}">
               {% if d.change_pct > 0 %}+{% endif %}{{ "%.2f"|format(d.change_pct) }}%
             </td>
+          </tr>
+          {% endfor %}
         </tbody>
       </table>
     </div>
