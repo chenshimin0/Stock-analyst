@@ -296,6 +296,12 @@ def _fund_flow_from_pywencai(code: str, days: int = 3) -> list:
         if hasattr(dde, "columns") and dde is not None and not dde.empty:
             df_dde = dde
 
+        # Daily DDE DataFrame: '每日dde大单净额' (common response key)
+        daily_dde = result.get("每日dde大单净额")
+        if hasattr(daily_dde, "columns") and daily_dde is not None and not daily_dde.empty:
+            if df_bar is None:
+                df_bar = daily_dde
+
         if df_bar is None and df_dde is None:
             # Last resort: scan all values for any DataFrame
             for v in result.values():
@@ -312,7 +318,7 @@ def _fund_flow_from_pywencai(code: str, days: int = 3) -> list:
         # Map columns with Chinese names from pywencai
         col_map = {}
         for c in primary.columns:
-            if c in ("时间", "日期"):
+            if c in ("时间", "日期", "时间区间"):
                 col_map["date"] = c
             elif c == "大单净额":
                 col_map["large_net"] = c
@@ -332,7 +338,8 @@ def _fund_flow_from_pywencai(code: str, days: int = 3) -> list:
         # Sort by date, take last N days
         date_col = col_map["date"]
         try:
-            primary[date_col] = pd.to_datetime(primary[date_col])
+            # Convert to string first (pywencai may return int like 20260522)
+            primary[date_col] = pd.to_datetime(primary[date_col].astype(str))
             primary = primary.sort_values(date_col)
         except Exception:
             pass
