@@ -731,11 +731,6 @@ tr:hover{background:#f5f9ff}
   {% endif %}
 </div>
 {% endif %}
-	<!-- AI业务与投资逻辑深度分析 -->
-	{% set biz_logic = ai.md_business_and_logic or ai.business_and_logic or "" %}
-	{% if biz_logic is string and biz_logic %}
-	<div class="card" style="margin-top:12px"><div class="insight-box blue">{{ biz_logic | markdown_html }}</div></div>
-	{% endif %}
 
 <!-- 4.5 资金面与涨停记录 -->
 {% set ffr = fund_flow_recent or [] %}
