@@ -122,7 +122,7 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
     fund_flow_recent = []
     try:
         from astock_data import get_fund_flow_recent
-        fund_flow_recent = get_fund_flow_recent(code, days=3)
+        fund_flow_recent = get_fund_flow_recent(code, days=8)
         if fund_flow_recent:
             logger.info("Fund flow recent for %s: %d days fetched", code, len(fund_flow_recent))
     except Exception as e:

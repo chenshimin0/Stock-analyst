@@ -377,68 +377,124 @@ def get_fund_flow_recent(code: str, days: int = 3) -> list:
     """Get individual stock fund flow for recent N trading days.
 
     Tries multiple data sources in order:
-    1. EastMoney push2his (direct HTTP — blocked on some cloud IPs)
-    2. akshare (handles 10jqka hexin-v decryption internally)
-    3. pywencai (iwencai DDE query)
+    1. EastMoney push2delay (works on cloud IPs, but only 1 day)
+    2. pywencai (iwencai DDE query — 大单净额, no breakdown)
+    3. Enriches with change_pct from Tencent K-line
 
     Returns list of {date, main_net, main_pct, super_large_net, large_net,
-                     medium_net, retail_net} dicts (oldest first), or [] on failure.
+                     medium_net, retail_net, change_pct, close} dicts
+    (most recent first), or [] on failure.
     """
-    # Source 1: EastMoney push2his (klt=101, 15-field format, blocked from cloud IPs)
+    import pandas as pd
+    
+    # Step 1: Try push2delay for the most recent day (full breakdown)
     secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
-    url = (
-        f"https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?"
-        f"lmt={days}&klt=101&secid={secid}&fields1=f1,f2,f3,f7&fields2="
-        f"f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
-    )
+    push2delay_data = []
     try:
-        req = urllib.request.Request(url, headers={"Referer": "https://quote.eastmoney.com/"})
+        url = (
+            f"https://push2delay.eastmoney.com/api/qt/stock/fflow/daykline/get?"
+            f"lmt=1&klt=101&secid={secid}&fields1=f1,f2,f3,f7&fields2="
+            f"f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
+        )
+        req = urllib.request.Request(url, headers={
+            "User-Agent": UA,
+            "Referer": f"https://data.eastmoney.com/zjlx/{code}.html",
+        })
         resp = urllib.request.urlopen(req, timeout=10)
         data = json.loads(resp.read())
         klines = data.get("data", {}).get("klines", [])
         if klines:
-            out = []
-            for line in klines[-days:]:
+            for line in klines:
                 p = line.split(",")
-                if len(p) < 11:
-                    continue
-                # klt=101 field layout (15 cols):
-                # 0=date 1=主力 2=小单 3=中单 4=大单 5=超大单
-                # 6=主力% 7=小单% 8=中单% 9=大单% 10=超大单%
-                out.append({
-                    "date": p[0],
-                    "main_net": float(p[1]) if p[1] != "-" else 0,
-                    "main_pct": float(p[6]) if len(p) > 6 and p[6] != "-" else 0,
-                    "super_large_net": float(p[5]) if p[5] != "-" else 0,
-                    "super_large_pct": float(p[10]) if len(p) > 10 and p[10] != "-" else 0,
-                    "large_net": float(p[4]) if p[4] != "-" else 0,
-                    "large_pct": float(p[9]) if len(p) > 9 and p[9] != "-" else 0,
-                    "medium_net": float(p[3]) if p[3] != "-" else 0,
-                    "medium_pct": float(p[8]) if len(p) > 8 and p[8] != "-" else 0,
-                    "retail_net": float(p[2]) if p[2] != "-" else 0,
-                    "retail_pct": float(p[7]) if len(p) > 7 and p[7] != "-" else 0,
-                    "close": float(p[11]) if len(p) > 11 and p[11] != "-" else 0,
-                    "change_pct": float(p[12]) if len(p) > 12 and p[12] != "-" else 0,
-                })
-            if out:
-                return out
+                if len(p) >= 13:
+                    push2delay_data.append({
+                        "date": p[0],
+                        "main_net": float(p[1]) if p[1] != "-" else 0,
+                        "main_pct": float(p[6]) if len(p) > 6 and p[6] != "-" else 0,
+                        "super_large_net": float(p[5]) if p[5] != "-" else 0,
+                        "super_large_pct": float(p[10]) if len(p) > 10 and p[10] != "-" else 0,
+                        "large_net": float(p[4]) if p[4] != "-" else 0,
+                        "large_pct": float(p[9]) if len(p) > 9 and p[9] != "-" else 0,
+                        "medium_net": float(p[3]) if p[3] != "-" else 0,
+                        "medium_pct": float(p[8]) if len(p) > 8 and p[8] != "-" else 0,
+                        "retail_net": float(p[2]) if p[2] != "-" else 0,
+                        "retail_pct": float(p[7]) if len(p) > 7 and p[7] != "-" else 0,
+                        "close": float(p[11]) if len(p) > 11 and p[11] != "-" else 0,
+                        "change_pct": float(p[12]) if len(p) > 12 and p[12] != "-" else 0,
+                    })
+        if push2delay_data:
+            logger.info(f"Fund flow for {code} via push2delay: {len(push2delay_data)} days")
     except Exception as e:
-        logger.debug(f"push2his fund flow failed for {code}: {e}")
+        logger.debug(f"push2delay fund flow failed for {code}: {e}")
 
-    # Source 2: akshare -> 10jqka hexin-v
-    result = _fund_flow_from_akshare(code, days)
+    # Step 2: Get additional days from pywencai (大单 only, no breakdown)
+    pywencai_data = _fund_flow_from_pywencai(code, days=max(days, 30))
+    
+    # Step 3: Enrich pywencai data with change_pct from Tencent K-line
+    if pywencai_data:
+        _enrich_change_pct(code, pywencai_data)
+    
+    # Step 4: Merge push2delay (full) + pywencai (large only), dedup by date
+    merged = {}
+    for d in push2delay_data:
+        merged[d["date"]] = d
+    for d in (pywencai_data or []):
+        date = d["date"]
+        if date not in merged:
+            merged[date] = d
+    
+    # Sort by date descending (most recent first) and take top N
+    result = sorted(merged.values(), key=lambda x: x["date"], reverse=True)[:days]
+    
     if result:
-        logger.info(f"Fund flow for {code} via akshare: {len(result)} days")
+        logger.info(f"Fund flow for {code}: {len(result)} days (push2delay+pywencai)")
         return result
-
-    # Source 3: pywencai DDE
-    result = _fund_flow_from_pywencai(code, days)
-    if result:
-        logger.info(f"Fund flow for {code} via pywencai: {len(result)} days")
-        return result
-
+    
     logger.warning(f"Fund flow recent failed for {code}: all sources exhausted")
     return []
+
+
+def _enrich_change_pct(code: str, fund_data: list) -> None:
+    """Add change_pct to fund flow data from Tencent K-line (前复权)."""
+    from datetime import datetime, timedelta
+    
+    prefix = "sh" if code.startswith(("6", "9")) else "sz"
+    dates = [d["date"] for d in fund_data if d.get("change_pct", 0) == 0]
+    if not dates:
+        return
+    
+    try:
+        today = datetime.now()
+        start = (today - timedelta(days=180)).strftime("%Y-%m-%d")
+        end = today.strftime("%Y-%m-%d")
+        url = (
+            f"http://web.ifzq.gtimg.cn/appstock/app/fqkline/get?"
+            f"param={prefix}{code},day,{start},{end},200,qfq"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": UA})
+        resp = urllib.request.urlopen(req, timeout=10)
+        raw = resp.read()
+        if raw[:2] == b'\x1f\x8b':
+            import gzip as _gzip
+            raw = _gzip.decompress(raw)
+        data = json.loads(raw)
+        klines = data["data"][f"{prefix}{code}"].get("qfqday", []) or data["data"][f"{prefix}{code}"].get("day", [])
+        
+        if klines:
+            # Build date -> change_pct map
+            pct_map = {}
+            for i in range(1, len(klines)):
+                prev_close = float(klines[i-1][2])
+                curr_close = float(klines[i][2])
+                curr_date = klines[i][0]
+                if prev_close > 0:
+                    pct_map[curr_date] = round((curr_close - prev_close) / prev_close * 100, 2)
+            
+            for d in fund_data:
+                if d.get("change_pct", 0) == 0 and d["date"] in pct_map:
+                    d["change_pct"] = pct_map[d["date"]]
+    except Exception as e:
+        logger.debug(f"Enrich change_pct failed for {code}: {e}")
 
 
 def get_last_limit_up_date(code: str, lookback_days: int = 120) -> Optional[str]:
