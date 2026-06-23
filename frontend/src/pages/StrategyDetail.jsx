@@ -100,7 +100,7 @@ export default function StrategyDetail() {
               onMouseEnter={e => e.currentTarget.style.background = '#1e3a5f'}
               onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? '#0f172a' : '#1a2236'}
               >
-                <td style={td}>{s.stock_code}</td>
+                <td style={td}><a href={`https://www.iwencai.com/screener/result?w=${encodeURIComponent(s.stock_name)}`} target="_blank" rel="noopener" title={`在 i 问财查看 ${s.stock_name}`}>{s.stock_code}</a></td>
                 <td style={td}>{s.stock_name}</td>
                 <td style={td}>{s.industry || <span style={{color:'#999'}}>—</span>}</td>
                 <td style={{...td, fontSize: 12, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}

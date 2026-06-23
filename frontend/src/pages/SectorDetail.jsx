@@ -71,7 +71,7 @@ export default function SectorDetail() {
         <tbody>
           {pick.stocks.map(s => (
             <tr key={s.code} style={{ borderBottom: '1px solid #eee' }}>
-              <td style={td}>{s.code}</td>
+              <td style={td}><a href={`https://www.iwencai.com/screener/result?w=${encodeURIComponent(s.name)}`} target="_blank" rel="noopener" title={`在 i 问财查看 ${s.name}`}>{s.code}</a></td>
               <td style={td}>{s.name}</td>
               <td style={td}>{s.reason}</td>
               <td style={td}>{s.t0_price != null ? s.t0_price.toFixed(2) : '—'}</td>

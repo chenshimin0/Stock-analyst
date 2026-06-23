@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { listStrategyPicks, deleteStrategyPick, deleteStockRow } from '../api/strategy.js';
 import { listStrategies } from '../api/strategies.js';
@@ -17,31 +17,73 @@ export default function StrategyList() {
   const [params] = useSearchParams();
   const filterStrategyId = params.get('strategy_id') ? Number(params.get('strategy_id')) : null;
 
+  // Filters
+  const [selectedStrategy, setSelectedStrategy] = useState(filterStrategyId ? String(filterStrategyId) : '');
+  const [selectedDate, setSelectedDate] = useState('');
+
   useEffect(() => {
     setLoading(true);
     setErr(null);
     const statuses = TABS.find(t => t.key === tab).statuses;
-    Promise.all([
-      ...statuses.map(s => listStrategyPicks(s, filterStrategyId).catch(() => [])),
-      listStrategies().catch(() => []),
-    ]).then(([picksArr, strats]) => {
-      setPicks(picksArr.flat());
-      setStrategies(strats);
-    })
-    .catch(e => setErr(String(e)))
-    .finally(() => setLoading(false));
-  }, [tab, filterStrategyId]);
+    // Fetch all picks (no strategy filter) so we can derive dates client-side
+    const pickPromises = statuses.map(s => listStrategyPicks(s).catch(() => []));
+    Promise.all([...pickPromises, listStrategies().catch(() => [])])
+      .then((results) => {
+        const strats = results.pop();
+        setPicks(results.flat());
+        setStrategies(strats);
+      })
+      .catch(e => setErr(String(e)))
+      .finally(() => setLoading(false));
+  }, [tab]);
+
+  // Set initial strategy from URL param
+  useEffect(() => {
+    if (filterStrategyId) setSelectedStrategy(String(filterStrategyId));
+  }, [filterStrategyId]);
+
+  // --- Derived data ---
+  // All unique dates from picks (sorted newest first)
+  const allDates = useMemo(() => {
+    return [...new Set(picks.map(p => {
+      return new Date(p.created_at).toISOString().split('T')[0];
+    }))].sort().reverse();
+  }, [picks]);
+
+  // Dates that have data for the currently selected strategy
+  const strategyDates = useMemo(() => {
+    if (!selectedStrategy) return new Set(allDates);
+    return new Set(picks
+      .filter(p => p.strategy_id === Number(selectedStrategy))
+      .map(p => new Date(p.created_at).toISOString().split('T')[0])
+    );
+  }, [picks, selectedStrategy, allDates]);
+
+  // Filtered picks
+  const filteredPicks = useMemo(() => {
+    return picks.filter(p => {
+      if (selectedStrategy && p.strategy_id !== Number(selectedStrategy)) return false;
+      if (selectedDate) {
+        const d = new Date(p.created_at).toISOString().split('T')[0];
+        if (d !== selectedDate) return false;
+      }
+      return true;
+    });
+  }, [picks, selectedStrategy, selectedDate]);
 
   const strategyName = (id, name) => name || strategies.find(s => s.id === id)?.name || `#${id}`;
 
   return (
     <div style={{ padding: 24 }}>
-      <h2 style={{ marginBottom: 16 }}>🎯 策略追踪（连续三日流入）</h2>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <h2 style={{ marginBottom: 16 }}>🎯 策略追踪</h2>
+
+      {/* Filters row */}
+      <div style={{ display: 'flex', gap: 12, marginBottom: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+        {/* Tab buttons */}
         {TABS.map(t => (
           <button
             key={t.key}
-            onClick={() => setTab(t.key)}
+            onClick={() => { setTab(t.key); setSelectedDate(''); }}
             style={{
               padding: '6px 14px',
               border: '1px solid #ccc',
@@ -54,22 +96,75 @@ export default function StrategyList() {
             {t.label}
           </button>
         ))}
+
+        <div style={{ width: 1, height: 24, background: '#ddd' }} />
+
+        {/* Strategy filter */}
+        <select
+          value={selectedStrategy}
+          onChange={e => { setSelectedStrategy(e.target.value); setSelectedDate(''); }}
+          style={{
+            padding: '6px 10px', border: '1px solid #ccc', borderRadius: 4,
+            fontSize: 13, background: '#fff', minWidth: 140,
+          }}
+        >
+          <option value="">全部策略</option>
+          {strategies.map(s => (
+            <option key={s.id} value={String(s.id)}>{s.name}</option>
+          ))}
+        </select>
+
+        {/* Date filter */}
+        <select
+          value={selectedDate}
+          onChange={e => setSelectedDate(e.target.value)}
+          style={{
+            padding: '6px 10px', border: '1px solid #ccc', borderRadius: 4,
+            fontSize: 13, background: '#fff', minWidth: 130,
+          }}
+        >
+          <option value="">全部日期</option>
+          {allDates.map(d => {
+            const hasData = strategyDates.has(d);
+            return (
+              <option
+                key={d}
+                value={d}
+                disabled={!hasData}
+                style={{
+                  color: hasData ? '#000' : '#ccc',
+                  fontWeight: hasData ? 600 : 400,
+                  background: hasData ? '#e8f5e9' : undefined,
+                }}
+              >
+                {d}{hasData ? ' ✓' : ' (无数据)'}
+              </option>
+            );
+          })}
+        </select>
+
+        {/* Result count */}
+        <span style={{ fontSize: 12, color: '#888', marginLeft: 4 }}>
+          {filteredPicks.length} / {picks.length} 个批次
+        </span>
       </div>
 
       {loading && <div>加载中…</div>}
       {err && <div style={{ color: 'red' }}>{err}</div>}
 
-      {!loading && picks.length === 0 && (
+      {!loading && filteredPicks.length === 0 && (
         <div style={{ color: '#888', padding: 24, textAlign: 'center' }}>
-          {tab === 'active'
-            ? '还没有策略批次。每天 14:30 自动跑 iwencai 选股，结果会出现在这里。'
-            : '没有归档批次。'}
+          {selectedStrategy || selectedDate
+            ? '没有匹配的批次。尝试清除筛选条件。'
+            : tab === 'active'
+              ? '还没有策略批次。每天 14:30 自动跑 iwencai 选股，结果会出现在这里。'
+              : '没有归档批次。'}
         </div>
       )}
 
-      {!loading && picks.length > 0 && (
+      {!loading && filteredPicks.length > 0 && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {picks.map(p => (
+          {filteredPicks.map(p => (
             <PickCard
               key={p.id}
               pick={p}
@@ -181,7 +276,7 @@ function PickCard({ pick, strategyName, onDeleted }) {
               onMouseEnter={e => e.currentTarget.style.background = '#1e3a5f'}
               onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? '#0f172a' : '#1a2236'}
               >
-                <td style={td}><code style={{ fontSize: 12, color: '#93c5fd' }}>{s.stock_code}</code></td>
+                <td style={td}><a href={`https://www.iwencai.com/screener/result?w=${encodeURIComponent(s.stock_name)}`} target="_blank" rel="noopener" style={{ textDecoration: 'none' }} title={`在 i 问财查看 ${s.stock_name}`}><code style={{ fontSize: 12, color: '#93c5fd' }}>{s.stock_code}</code></a></td>
                 <td style={{ ...td, fontWeight: 600, color: '#f0f6fc' }}>{s.stock_name}</td>
                 <td style={td}><span style={{ color: s.industry ? '#9ca3af' : '#4b5563', fontSize: 12 }}>{s.industry || '—'}</span></td>
                 <td style={td}>{s.t0_price != null ? s.t0_price.toFixed(2) : '—'}</td>
