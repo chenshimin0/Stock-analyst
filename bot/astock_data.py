@@ -257,201 +257,333 @@ def _fund_flow_from_akshare(code: str, days: int = 3) -> list:
         return []
 
 
-def _fund_flow_from_pywencai(code: str, days: int = 3) -> list:
-    """Get fund flow via pywencai DDE query.
+# ---------------------------------------------------------------------------
+# pywencai stock data cache (module-level, cleared per process)
+# ---------------------------------------------------------------------------
+_pywencai_cache: dict[str, dict] = {}
 
-    pywencai returns a dict with keys like 'bar3' (大单净额 DataFrame)
-    and 'dde大单净额相关数据' (detailed DDE DataFrame).
+
+def get_pywencai_stock_data(code: str, use_cache: bool = True) -> dict:
+    """Get comprehensive stock data from pywencai (iwencai) in a single call.
+
+    Returns structured data for: fund flow, financials, valuation, events,
+    concept boards, dragon tiger, top shareholders, diagnosis, support/resistance.
+
+    Results are cached in-process to avoid duplicate calls.
+    Returns dict with all available data, or {} on failure.
+    """
+    if use_cache and code in _pywencai_cache:
+        return _pywencai_cache[code]
+
+    import pywencai
+    import time
+
+    # Monkey-patch: add Referer to avoid 403 from iwencai
+    try:
+        from pywencai import headers as _pywencai_hdr_mod
+        _orig_headers = _pywencai_hdr_mod.headers
+        def _patched_headers(cookie=None, user_agent=None):
+            h = _orig_headers(cookie=cookie, user_agent=user_agent)
+            h.setdefault("Referer", "https://www.iwencai.com/")
+            return h
+        _pywencai_hdr_mod.headers = _patched_headers
+    except Exception:
+        pass
+
+    last_err = None
+    for attempt in range(3):
+        try:
+            result = pywencai.get(query=code)
+            if isinstance(result, dict):
+                _pywencai_cache[code] = result
+                logger.info(f"pywencai stock data for {code}: {list(result.keys())}")
+                return result
+            if result is None:
+                last_err = "pywencai returned None"
+            else:
+                last_err = f"unexpected type {type(result)}"
+        except Exception as e:
+            last_err = str(e)
+        if attempt < 2:
+            time.sleep(2 ** attempt)  # 1s, 2s
+
+    logger.warning(f"pywencai stock data failed for {code}: {last_err}")
+    return {}
+
+
+def _fund_flow_from_pywencai(code: str, days: int = 30) -> list:
+    """Get fund flow from pywencai stock query (历史主力资金流向).
+
+    Uses pywencai.get(query=code) → '历史主力资金流向' → 'barline3'
+    (columns: 时间, 成交额, 主力资金). This matches 10jqka's fund flow page.
+
+    No super_large/large breakdown — the '逐日资金流向' query uses DDE
+    methodology that disagrees with 历史主力资金流向 on some stocks.
 
     Returns list of {date, main_net, main_pct, super_large_net, large_net,
-                     medium_net, retail_net} dicts, or [] on failure.
+                     medium_net, retail_net, turnover} dicts.
+    Values are in raw yuan (template handles unit conversion).
+    Returns [] on failure.
     """
     try:
-        import pywencai
         import pandas as pd
 
-        result = pywencai.get(query=f"{code} 大单净流入 最近{days}日", loop=True)
-        if not isinstance(result, dict):
+        stock_data = get_pywencai_stock_data(code)
+        if not stock_data:
             return []
 
-        # Find the 'bar3' DataFrame — contains 大单净额 daily data
-        df_bar = None
-        df_dde = None
+        flow_section = stock_data.get("历史主力资金流向", {})
+        if isinstance(flow_section, dict):
+            df = flow_section.get("barline3")
+        else:
+            df = stock_data.get("barline3")
 
-        # Direct key: 'bar3'
-        bar3 = result.get("bar3")
-        if hasattr(bar3, "columns") and bar3 is not None and not bar3.empty:
-            df_bar = bar3
-
-        # Nested: '近30日大单净额' -> 'bar3'
-        if df_bar is None:
-            nested = result.get("近30日大单净额", {})
-            if isinstance(nested, dict):
-                nested_bar = nested.get("bar3")
-                if hasattr(nested_bar, "columns") and nested_bar is not None and not nested_bar.empty:
-                    df_bar = nested_bar
-
-        # DDE detail DataFrame
-        dde = result.get("dde大单净额相关数据")
-        if hasattr(dde, "columns") and dde is not None and not dde.empty:
-            df_dde = dde
-
-        # Daily DDE DataFrame: '每日dde大单净额' (common response key)
-        daily_dde = result.get("每日dde大单净额")
-        if hasattr(daily_dde, "columns") and daily_dde is not None and not daily_dde.empty:
-            if df_bar is None:
-                df_bar = daily_dde
-
-        if df_bar is None and df_dde is None:
-            # Last resort: scan all values for any DataFrame
-            for v in result.values():
-                if hasattr(v, "columns") and v is not None and not v.empty:
-                    df_bar = v
-                    break
-            if df_bar is None:
-                logger.debug("pywencai: no DataFrame found in result")
-                return []
-
-        # Use bar3 as primary source, dde as enrichment
-        primary = df_bar if df_bar is not None else df_dde
-
-        # Map columns with Chinese names from pywencai
-        col_map = {}
-        for c in primary.columns:
-            if c in ("时间", "日期", "时间区间"):
-                col_map["date"] = c
-            elif c == "大单净额":
-                col_map["large_net"] = c
-            elif c == "dde大单净额":
-                col_map["dde_large_net"] = c
-            elif c == "dde大单买入金额":
-                col_map["large_buy"] = c
-            elif c == "dde大单卖出金额":
-                col_map["large_sell"] = c
-            elif c == "dde大单净量":
-                col_map["large_net_vol"] = c
-
-        if "date" not in col_map:
-            logger.debug(f"pywencai fund flow: no date column in {list(primary.columns)[:8]}")
+        if df is None or not hasattr(df, "columns") or df.empty:
+            logger.debug(f"pywencai fund flow for {code}: no barline3")
             return []
 
-        # Sort by date, take last N days
-        date_col = col_map["date"]
+        date_col = None
+        main_col = None
+        turnover_col = None
+        for c in df.columns:
+            if c in ("时间",):
+                date_col = c
+            elif c == "主力资金":
+                main_col = c
+            elif c == "成交额":
+                turnover_col = c
+
+        if date_col is None or main_col is None:
+            logger.debug(f"pywencai fund flow for {code}: columns={list(df.columns)}")
+            return []
+
         try:
-            # Convert to string first (pywencai may return int like 20260522)
-            primary[date_col] = pd.to_datetime(primary[date_col].astype(str))
-            primary = primary.sort_values(date_col)
+            df[date_col] = pd.to_datetime(df[date_col].astype(str))
+            df = df.sort_values(date_col)
         except Exception:
             pass
 
         out = []
-        rows = primary.tail(days)
+        rows = df.tail(days)
         for _, row in rows.iterrows():
-            date_val = str(row[date_col])[:10]
-            large_net = 0
+            date_raw = str(row[date_col])[:10]
+            if " " in date_raw:
+                date_raw = date_raw.split(" ")[0]
+            if len(date_raw) == 8 and date_raw.isdigit():
+                date_val = f"{date_raw[:4]}-{date_raw[4:6]}-{date_raw[6:8]}"
+            else:
+                date_val = date_raw
 
-            # bar3 format: 大单净额 is the primary large-order net in yuan
-            if "large_net" in col_map:
-                large_net = float(row[col_map["large_net"]]) if pd.notna(row[col_map["large_net"]]) else 0
-            # dde format: dde大单净额 in yuan
-            elif "dde_large_net" in col_map:
-                large_net = float(row[col_map["dde_large_net"]]) if pd.notna(row[col_map["dde_large_net"]]) else 0
+            main_net = float(row[main_col]) if pd.notna(row[main_col]) else 0.0
+            turnover = float(row[turnover_col]) if turnover_col and pd.notna(row[turnover_col]) else 0.0
+            main_pct = round(main_net / turnover * 100, 2) if turnover > 0 else 0.0
 
             out.append({
                 "date": date_val,
-                "main_net": large_net,          # pywencai only has large order, use as main
-                "main_pct": 0,                   # not available from pywencai
-                "super_large_net": 0,            # not available separately
-                "large_net": large_net,
-                "medium_net": 0,                 # not available
-                "retail_net": 0,                 # not available
+                "main_net": main_net,
+                "main_pct": main_pct,
+                "super_large_net": 0,
+                "large_net": main_net,
+                "medium_net": 0,
+                "retail_net": 0,
+                "turnover": turnover,
+                "change_pct": 0,   # will be enriched by _enrich_change_pct
             })
 
+        if out:
+            logger.info(f"pywencai fund flow for {code}: {len(out)} days")
         return out
     except Exception as e:
         logger.debug(f"pywencai fund flow failed for {code}: {e}")
         return []
 
 
-def get_fund_flow_recent(code: str, days: int = 3) -> list:
+def get_fund_flow_recent(code: str, days: int = 8) -> list:
     """Get individual stock fund flow for recent N trading days.
 
-    Tries multiple data sources in order:
-    1. EastMoney push2delay (works on cloud IPs, but only 1 day)
-    2. pywencai (iwencai DDE query — 大单净额, no breakdown)
-    3. Enriches with change_pct from Tencent K-line
+    Primary source: pywencai stock query 历史主力资金流向 (matches 10jqka).
+    Enriches with:
+    - change_pct from Tencent K-line (historical days)
+    - change_pct from pywencai kline2 for latest day (fallback)
 
     Returns list of {date, main_net, main_pct, super_large_net, large_net,
                      medium_net, retail_net, change_pct, close} dicts
     (most recent first), or [] on failure.
     """
-    import pandas as pd
-    
-    # Step 1: Try push2delay for the most recent day (full breakdown)
-    secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
-    push2delay_data = []
-    try:
-        url = (
-            f"https://push2delay.eastmoney.com/api/qt/stock/fflow/daykline/get?"
-            f"lmt=1&klt=101&secid={secid}&fields1=f1,f2,f3,f7&fields2="
-            f"f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
-        )
-        req = urllib.request.Request(url, headers={
-            "User-Agent": UA,
-            "Referer": f"https://data.eastmoney.com/zjlx/{code}.html",
-        })
-        resp = urllib.request.urlopen(req, timeout=10)
-        data = json.loads(resp.read())
-        klines = data.get("data", {}).get("klines", [])
-        if klines:
-            for line in klines:
-                p = line.split(",")
-                if len(p) >= 13:
-                    push2delay_data.append({
-                        "date": p[0],
-                        "main_net": float(p[1]) if p[1] != "-" else 0,
-                        "main_pct": float(p[6]) if len(p) > 6 and p[6] != "-" else 0,
-                        "super_large_net": float(p[5]) if p[5] != "-" else 0,
-                        "super_large_pct": float(p[10]) if len(p) > 10 and p[10] != "-" else 0,
-                        "large_net": float(p[4]) if p[4] != "-" else 0,
-                        "large_pct": float(p[9]) if len(p) > 9 and p[9] != "-" else 0,
-                        "medium_net": float(p[3]) if p[3] != "-" else 0,
-                        "medium_pct": float(p[8]) if len(p) > 8 and p[8] != "-" else 0,
-                        "retail_net": float(p[2]) if p[2] != "-" else 0,
-                        "retail_pct": float(p[7]) if len(p) > 7 and p[7] != "-" else 0,
-                        "close": float(p[11]) if len(p) > 11 and p[11] != "-" else 0,
-                        "change_pct": float(p[12]) if len(p) > 12 and p[12] != "-" else 0,
-                    })
-        if push2delay_data:
-            logger.info(f"Fund flow for {code} via push2delay: {len(push2delay_data)} days")
-    except Exception as e:
-        logger.debug(f"push2delay fund flow failed for {code}: {e}")
+    # Step 1: pywencai as primary source (30 days of fund flow data)
+    fund_data = _fund_flow_from_pywencai(code, days=max(days, 30))
 
-    # Step 2: Get additional days from pywencai (大单 only, no breakdown)
-    pywencai_data = _fund_flow_from_pywencai(code, days=max(days, 30))
-    
-    # Step 3: Enrich pywencai data with change_pct from Tencent K-line
-    if pywencai_data:
-        _enrich_change_pct(code, pywencai_data)
-    
-    # Step 4: Merge push2delay (full) + pywencai (large only), dedup by date
-    merged = {}
-    for d in push2delay_data:
-        merged[d["date"]] = d
-    for d in (pywencai_data or []):
-        date = d["date"]
-        if date not in merged:
-            merged[date] = d
-    
-    # Sort by date descending (most recent first) and take top N
-    result = sorted(merged.values(), key=lambda x: x["date"], reverse=True)[:days]
-    
+    # Step 2: Enrich with change_pct from Tencent K-line (前复权)
+    if fund_data:
+        _enrich_change_pct(code, fund_data)
+
+    # Step 3: Fallback — if latest day still has change_pct=0, try Tencent realtime
+    if fund_data:
+        # fund_data is chronologically sorted (oldest first from _fund_flow_from_pywencai)
+        latest_entry = fund_data[-1]  # last = most recent date
+        if latest_entry.get("change_pct", 0) == 0:
+            try:
+                prefix = "sh" if code.startswith(("6", "9")) else "sz"
+                url = f"http://qt.gtimg.cn/q={prefix}{code}"
+                req = urllib.request.Request(url, headers={"User-Agent": UA})
+                resp = urllib.request.urlopen(req, timeout=8)
+                raw = resp.read().decode("gbk", errors="replace")
+                parts = raw.split("~")
+                if len(parts) > 32:
+                    chg = float(parts[32]) if parts[32] else 0.0
+                    if chg != 0:
+                        latest_entry["change_pct"] = chg
+            except Exception:
+                pass
+
+    # Step 4: Sort by date descending (most recent first) and take top N
+    result = sorted(fund_data, key=lambda x: x["date"], reverse=True)[:days]
+
     if result:
-        logger.info(f"Fund flow for {code}: {len(result)} days (push2delay+pywencai)")
+        logger.info(f"Fund flow for {code}: {len(result)} days (pywencai)")
         return result
-    
-    logger.warning(f"Fund flow recent failed for {code}: all sources exhausted")
+
+    logger.warning(f"Fund flow recent failed for {code}: pywencai returned no data")
     return []
+
+
+# ---------------------------------------------------------------------------
+# pywencai data extractors — pull specific sections from cached stock data
+# ---------------------------------------------------------------------------
+
+def get_pywencai_concept_boards(code: str) -> list:
+    """Get concept/thematic boards from pywencai 所属概念列表.
+
+    Returns list of {board_name, board_type, source} dicts.
+    Falls back to empty list on failure.
+    """
+    try:
+        data = get_pywencai_stock_data(code)
+        if not data:
+            return []
+
+        df = data.get("所属概念列表")
+        if df is None or not hasattr(df, "columns") or df.empty:
+            return []
+
+        boards = []
+        seen = set()
+        for _, row in df.iterrows():
+            name = str(row.get("诊股概念分类名称", "")).strip()
+            btype = str(row.get("诊股概念分类类型", "")).strip()
+            if name and name not in seen:
+                seen.add(name)
+                boards.append({
+                    "board_name": name,
+                    "board_type": btype,
+                    "source": "pywencai",
+                })
+
+        logger.info(f"pywencai concept boards for {code}: {len(boards)} boards")
+        return boards
+    except Exception as e:
+        logger.debug(f"pywencai concept boards failed for {code}: {e}")
+        return []
+
+
+def get_pywencai_recent_events(code: str) -> list:
+    """Get recent important events from pywencai 近期重要事件.
+
+    Returns list of {event_name, event_content, event_date, code} dicts.
+    Useful for limit-up/down detection, insider trading announcements, etc.
+    """
+    try:
+        data = get_pywencai_stock_data(code)
+        if not data:
+            return []
+
+        df = data.get("近期重要事件")
+        if df is None or not hasattr(df, "columns") or df.empty:
+            return []
+
+        events = []
+        for _, row in df.iterrows():
+            events.append({
+                "event_name": str(row.get("重要事件名称", "")),
+                "event_content": str(row.get("重要事件内容", "")),
+                "event_date": str(row.get("重要事件公告时间", "")),
+                "code": str(row.get("股票代码", code)),
+            })
+
+        return events
+    except Exception as e:
+        logger.debug(f"pywencai events failed for {code}: {e}")
+        return []
+
+
+def get_last_limit_up_from_pywencai(code: str) -> Optional[str]:
+    """Get the most recent limit-up date from pywencai events.
+
+    Returns date string YYYY-MM-DD or None. Much more reliable than K-line based
+    detection because pywencai explicitly tracks limit-up/down events.
+    """
+    try:
+        events = get_pywencai_recent_events(code)
+        for ev in events:
+            if "涨停" in ev.get("event_name", ""):
+                date_str = ev.get("event_date", "")
+                # Normalise YYYYMMDD -> YYYY-MM-DD
+                if len(date_str) == 8 and date_str.isdigit():
+                    return f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                elif "-" in date_str:
+                    return date_str[:10]
+        return None
+    except Exception as e:
+        logger.debug(f"pywencai limit-up detection failed for {code}: {e}")
+        return None
+
+
+def get_pywencai_valuation(code: str) -> dict:
+    """Get valuation data from pywencai 估值指标.
+
+    Returns dict with PE/PB/PS current values and historical percentile data.
+    Keys: pe_current, pe_percentile, pb_current, pb_percentile,
+          ps_current, ps_percentile.
+    Does NOT include raw history DataFrames (avoids JSON serialisation issues).
+    """
+    try:
+        data = get_pywencai_stock_data(code)
+        if not data:
+            return {}
+
+        val = data.get("估值指标", {})
+        if not isinstance(val, dict):
+            return {}
+
+        out = {}
+        for metric in ("市盈率", "市净率", "市销率"):
+            section = val.get(metric, {})
+            if not isinstance(section, dict):
+                continue
+            df = section.get("labelLine")
+            if df is None or not hasattr(df, "columns") or df.empty:
+                continue
+
+            prefix = {"市盈率": "pe", "市净率": "pb", "市销率": "ps"}[metric]
+
+            # Current value = last row
+            col_name = f"{prefix}_current"
+            for c in df.columns:
+                if "市盈率(pe)" in c or "市净率(pb)" in c or "市销率(ps)" in c:
+                    out[col_name] = float(df[c].iloc[-1]) if not df.empty else None
+                    break
+
+            # Percentile = last row
+            pct_col = f"{prefix}_percentile"
+            for c in df.columns:
+                if "分位点" in c:
+                    out[pct_col] = float(df[c].iloc[-1]) if not df.empty else None
+                    break
+
+        return out
+    except Exception as e:
+        logger.debug(f"pywencai valuation failed for {code}: {e}")
+        return {}
 
 
 def _enrich_change_pct(code: str, fund_data: list) -> None:

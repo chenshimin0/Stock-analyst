@@ -91,6 +91,17 @@ def _pick_for(strategy: Strategy, db) -> dict:
     # iwencai via pywencai (no token needed, handles anti-bot internally)
     try:
         import pywencai
+        # Monkey-patch: add Referer to avoid 403 from iwencai
+        try:
+            from pywencai import headers as _pywencai_hdr_mod
+            _orig_headers = _pywencai_hdr_mod.headers
+            def _patched_headers(cookie=None, user_agent=None):
+                h = _orig_headers(cookie=cookie, user_agent=user_agent)
+                h.setdefault("Referer", "https://www.iwencai.com/")
+                return h
+            _pywencai_hdr_mod.headers = _patched_headers
+        except Exception:
+            pass
         df = pywencai.get(
             query=_query,
             sort_key='成交金额', sort_order='desc',
