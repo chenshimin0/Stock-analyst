@@ -84,11 +84,15 @@ def _pick_for(strategy: Strategy, db) -> dict:
         "message": "",
     }
 
+    # Normalise full-width Chinese punctuation to ASCII equivalents,
+    # because the iwencai API may not handle full-width chars correctly.
+    _query = strategy.query_text.replace("；", ";").replace("，", ",")
+
     # iwencai via pywencai (no token needed, handles anti-bot internally)
     try:
         import pywencai
         df = pywencai.get(
-            query=strategy.query_text,
+            query=_query,
             sort_key='成交金额', sort_order='desc',
             loop=False,
         )

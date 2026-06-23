@@ -156,6 +156,7 @@ export default function Strategies() {
 
       {editing && (
         <StrategyForm
+          key={editing === 'new' ? 'new' : editing.id}
           initial={editing === 'new' ? EMPTY_FORM : {
             name: editing.name, query_text: editing.query_text,
             schedule_cron: editing.schedule_cron, enabled: editing.enabled,
