@@ -124,10 +124,10 @@ def reload_pick_jobs(scheduler: BlockingScheduler) -> int:
 def main() -> None:
     scheduler = BlockingScheduler(timezone="Asia/Shanghai")
     reload_pick_jobs(scheduler)
-    # Tracker runs once a day at 20:00 weekdays
+    # Tracker runs once a day at 18:00 weekdays
     scheduler.add_job(
         _safe_track,
-        CronTrigger(hour=20, minute=0, day_of_week="mon-fri",
+        CronTrigger(hour=18, minute=0, day_of_week="mon-fri",
                     timezone="Asia/Shanghai"),
         id="strategy_track",
         replace_existing=True,
