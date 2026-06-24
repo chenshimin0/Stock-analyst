@@ -215,7 +215,7 @@ function PickCard({ pick, stockFilter, strategyName, onDeleted }) {
   const hidden = pick.hit_count - preview.length;
 
   const q = (stockFilter || '').trim().toLowerCase();
-  const isMatch = (s) => !q || s.stock_code.toLowerCase().includes(q) || s.stock_name.toLowerCase().includes(q);
+  const isMatch = (s) => q && (s.stock_code.toLowerCase().includes(q) || s.stock_name.toLowerCase().includes(q));
 
   const handleDeleteStock = async (stockId, stockName) => {
     if (!confirm(`确认从批次 #${pick.id} 中删除 ${stockName}？`)) return;

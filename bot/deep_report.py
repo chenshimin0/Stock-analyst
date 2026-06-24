@@ -417,15 +417,24 @@ def build_analysis_data(code: str) -> Optional[dict]:
                 logger.info(f"Indicators enriched from 10jqka K-line (MA60={ind.get('ma60')})")
 
     # Concept boards
+    # Primary: pywencai (no cookies needed, always available, more relevant)
+    # Fallback: 10jqka F10 (needs cookies) -> EastMoney
     concept_boards = []
-    # Try 10jqka first (more complete/relevant concept mapping), fall back to EastMoney
     try:
-        from astock_data_10jqka import get_concept_boards_10jqka
-        concept_boards = get_concept_boards_10jqka(code)
+        from astock_data import get_pywencai_concept_boards
+        concept_boards = get_pywencai_concept_boards(code)
         if concept_boards:
-            logger.info(f"Concept boards from 10jqka for {code}: {[c['board_name'] for c in concept_boards[:10]]}")
+            logger.info(f"Concept boards from pywencai for {code}: {[c['board_name'] for c in concept_boards[:10]]}")
     except Exception as e:
-        logger.debug(f"10jqka concept boards unavailable: {e}")
+        logger.debug(f"pywencai concept boards unavailable: {e}")
+    if not concept_boards:
+        try:
+            from astock_data_10jqka import get_concept_boards_10jqka
+            concept_boards = get_concept_boards_10jqka(code)
+            if concept_boards:
+                logger.info(f"Concept boards from 10jqka for {code}: {[c['board_name'] for c in concept_boards[:10]]}")
+        except Exception as e:
+            logger.debug(f"10jqka concept boards unavailable: {e}")
     if not concept_boards:
         try:
             concept_boards = get_concept_boards(code)
@@ -527,6 +536,30 @@ def build_analysis_data(code: str) -> Optional[dict]:
         if len(filtered_boards) >= 10:
             break
 
+    # ---- pywencai valuation & events (zero-config, always available) ----
+    pywencai_valuation = {}
+    try:
+        from astock_data import get_pywencai_valuation
+        pywencai_valuation = get_pywencai_valuation(code)
+        if pywencai_valuation:
+            logger.info(f"pywencai valuation for {code}: PE={pywencai_valuation.get('pe_current')}, "
+                       f"PE%={pywencai_valuation.get('pe_percentile')}")
+    except Exception as e:
+        logger.debug(f"pywencai valuation skipped: {e}")
+
+    pywencai_events = []
+    try:
+        from astock_data import get_pywencai_recent_events
+        pywencai_events = get_pywencai_recent_events(code)
+        if pywencai_events:
+            logger.info(f"pywencai events for {code}: {len(pywencai_events)} events")
+    except Exception as e:
+        logger.debug(f"pywencai events skipped: {e}")
+
+    # Enrich data_10jqka with pywencai data
+    data_10jqka["pywencai_valuation"] = pywencai_valuation
+    data_10jqka["pywencai_events"] = pywencai_events
+
     return {
         "quote": quote, "name": name, "code": code,
         "ind": ind, "flow": flow, "news": all_news,
@@ -538,6 +571,8 @@ def build_analysis_data(code: str) -> Optional[dict]:
         "financial_data": financial_data,
         "peer_comparison": peer_comparison,
         "revenue_composition": revenue_composition,
+        "pywencai_valuation": pywencai_valuation,
+        "pywencai_events": pywencai_events,
     }
 
 

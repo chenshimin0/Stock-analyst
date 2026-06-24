@@ -164,7 +164,7 @@ export default function SectorList() {
                 </tr>
                 {isExpanded && (
                   <tr>
-                    <td colSpan={8} style={{ padding: '12px 20px', background: '#f9fafb' }}>
+                    <td colSpan={8} style={{ padding: '12px 20px' }}>
                       {detail?.loading ? (
                         <div style={{ color: '#888', padding: 16 }}>加载中…</div>
                       ) : detail?.error ? (
@@ -185,7 +185,7 @@ export default function SectorList() {
                           </thead>
                           <tbody>
                             {detail.data.stocks.map((s, i) => (
-                              <tr key={i} style={{ borderBottom: '1px solid #e8eaf0', background: i%2===0?'#fff':'#f9fafb' }}>
+                              <tr key={i} style={{ borderBottom: '1px solid #e8eaf0' }}>
                                 <td style={td}><code>{s.code}</code></td>
                                 <td style={{...td, fontWeight:600}}>{s.name}</td>
                                 <td style={{...td, fontSize:12, color:'#666'}}>{s.reason || '—'}</td>

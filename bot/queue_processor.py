@@ -103,13 +103,17 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
         except Exception as e:
             logger.warning("Revenue composition re-fetch failed for %s: %s", code, e)
 
-    # === New: 最近涨停日 (limit-up detection works reliably via Tencent K-line) ===
+    # === New: 最近涨停日 (pywencai events, more reliable than K-line) ===
     last_limit_up_date = None
     last_limit_up_days_ago = None
     try:
-        from astock_data import get_last_limit_up_date
+        from astock_data import get_last_limit_up_from_pywencai, get_last_limit_up_date
         from datetime import date as _date
-        last_limit_up_date = get_last_limit_up_date(code, lookback_days=180)
+        # Try pywencai first (explicit event tracking)
+        last_limit_up_date = get_last_limit_up_from_pywencai(code)
+        if not last_limit_up_date:
+            # Fallback: K-line based detection
+            last_limit_up_date = get_last_limit_up_date(code, lookback_days=180)
         if last_limit_up_date:
             try:
                 lud = _date.fromisoformat(last_limit_up_date)
@@ -118,11 +122,11 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                 last_limit_up_days_ago = None
     except Exception as e:
         logger.warning("Limit-up fetch failed for %s: %s", code, e)
-    # Fund flow recent: tries EastMoney push2 -> akshare -> pywencai
+    # Fund flow recent: pywencai 历史主力资金流向 (30+ days, 主力资金)
     fund_flow_recent = []
     try:
         from astock_data import get_fund_flow_recent
-        fund_flow_recent = get_fund_flow_recent(code, days=8)
+        fund_flow_recent = get_fund_flow_recent(code, days=5)
         if fund_flow_recent:
             logger.info("Fund flow recent for %s: %d days fetched", code, len(fund_flow_recent))
     except Exception as e:

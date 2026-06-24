@@ -34,6 +34,7 @@ class Report(Base):
     revenue_composition_raw = Column(JSON, nullable=True)
     adjusted_price_at_report = Column(Float, nullable=True)
     fund_flow_recent = Column(JSON, nullable=True)
+    fund_flow_refreshed_at = Column(Date, nullable=True)
     last_limit_up_date = Column(String(20), nullable=True)
     last_limit_up_days_ago = Column(Integer, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

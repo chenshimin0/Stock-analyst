@@ -102,6 +102,7 @@ _tpl_env = Environment(
     loader=FileSystemLoader(str(Path(__file__).parent.parent / "templates"))
 )
 _tpl_env.filters["markdown_html"] = _markdown_to_html
+_tpl_env.filters["urlencode"] = lambda s: __import__("urllib.parse").parse.quote(str(s))
 
 
 @router.get("", response_model=PaginatedReports)
@@ -126,8 +127,13 @@ async def get_report(
 ):
     # Try numeric ID first, then slug lookup, then stock_code fallback
     data = None
+    report = None
     if report_id.isdigit():
-        data = await ReportService.get_report_with_realtime(db, int(report_id))
+        report = db.query(Report).filter(Report.id == int(report_id)).first()
+        if report:
+            # Lazy-refresh fund flow + limit-up data on every view
+            ReportService.refresh_fund_flow_if_stale(db, report)
+            data = await ReportService.get_report_with_realtime(db, report.id)
     if not data:
         report = (
             db.query(Report)
@@ -136,6 +142,7 @@ async def get_report(
             .first()
         )
         if report:
+            ReportService.refresh_fund_flow_if_stale(db, report)
             data = await ReportService.get_report_with_realtime(db, report.id)
     if not data:
         return {"detail": "Report not found"}, 404

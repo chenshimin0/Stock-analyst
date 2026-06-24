@@ -306,7 +306,7 @@ tr:hover{background:#f5f9ff}
 <div class="hero">
   <div class="hero-inner">
     <h1>{{ stock_name }} <span>（{{ stock_code }}.{{ 'SH' if stock_code.startswith('6') else 'SZ' }}）</span></h1>
-    <div class="subtitle">深度分析报告 | {{ report_date }}</div>
+    <div class="subtitle">深度分析报告 | {{ report_date }} | <a href="https://www.iwencai.com/screener/result?w={{ stock_name|urlencode }}" target="_blank" rel="noopener" style="color:#7ec8ff;text-decoration:none" title="在 i 问财查看 {{ stock_name }}">🔍 i 问财选股</a></div>
 
     {% set ai = ai_analysis or {} %}
 
@@ -741,7 +741,7 @@ tr:hover{background:#f5f9ff}
   {# === 近 3 日: 2 summary cards only, no table === #}
   {% if ffr_3d %}
   <div class="card" style="margin-bottom:12px">
-    <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 3 日大单净流入（主力 = 超大单+大单）</div>
+    <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 3 日主力净流入</div>
     {% set total_3d = ffr_3d | sum(attribute='main_net') %}
     {% set in_3d = ffr_3d | selectattr('main_net', 'gt', 0) | list | length %}
     {% set out_3d = ffr_3d | selectattr('main_net', 'lt', 0) | list | length %}
@@ -762,24 +762,24 @@ tr:hover{background:#f5f9ff}
   </div>
   {% endif %}
 
-  {# === 近 8 日: 3 summary cards + table === #}
+  {# === 近 5 日: 3 summary cards + table === #}
   <div class="card" style="margin-bottom:12px">
-    <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 8 日大单净流入（主力 = 超大单+大单）</div>
-    {% set total_8d = ffr | sum(attribute='main_net') %}
-    {% set in_8d = ffr | selectattr('main_net', 'gt', 0) | list | length %}
-    {% set out_8d = ffr | selectattr('main_net', 'lt', 0) | list | length %}
+    <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 5 日主力净流入</div>
+    {% set total_5d = ffr | sum(attribute='main_net') %}
+    {% set in_5d = ffr | selectattr('main_net', 'gt', 0) | list | length %}
+    {% set out_5d = ffr | selectattr('main_net', 'lt', 0) | list | length %}
     <div class="card-grid-3" style="margin-bottom:10px">
       <div>
-        <div class="stat-label">近 8 日主力净流入合计</div>
-        <div class="stat-value {% if total_8d > 0 %}up{% elif total_8d < 0 %}down{% else %}blue{% endif %}">
-          {% if total_8d > 0 %}+{% endif %}{{ "%.2f"|format(total_8d / 100000000) }}亿
+        <div class="stat-label">近 5 日主力净流入合计</div>
+        <div class="stat-value {% if total_5d > 0 %}up{% elif total_5d < 0 %}down{% else %}blue{% endif %}">
+          {% if total_5d > 0 %}+{% endif %}{{ "%.2f"|format(total_5d / 100000000) }}亿
         </div>
-        <div class="stat-sub">{{ "%.0f"|format(total_8d / 10000) }} 万元</div>
+        <div class="stat-sub">{{ "%.0f"|format(total_5d / 10000) }} 万元</div>
       </div>
       <div>
         <div class="stat-label">流入天数 / 流出天数</div>
-        <div class="stat-value blue">{{ in_8d }} 天 / {{ out_8d }} 天</div>
-        <div class="stat-sub">近 8 个交易日</div>
+        <div class="stat-value blue">{{ in_5d }} 天 / {{ out_5d }} 天</div>
+        <div class="stat-sub">近 5 个交易日</div>
       </div>
       <div>
         <div class="stat-label">最近一日主力动向</div>
@@ -797,28 +797,20 @@ tr:hover{background:#f5f9ff}
             <th class="text-center">涨跌幅</th>
             <th class="text-center">主力净流入(万)</th>
             <th class="text-center">主力净占比</th>
-            <th class="text-center">超大单(万)</th>
-            <th class="text-center">大单(万)</th>
           </tr>
         </thead>
         <tbody>
           {% for d in ffr %}
           <tr{% if loop.index <= 3 %} style="background:#f0f4ff"{% endif %}>
             <td>{% if loop.index == 1 %}📌 {% endif %}{{ d.date or '' }}</td>
-            <td class="text-center {% if d.change_pct > 0 %}up{% elif d.change_pct < 0 %}down{% endif %}" style="font-weight:700">
-              {% if d.change_pct > 0 %}+{% endif %}{{ "%.2f"|format(d.change_pct) }}%
+            <td class="text-center {% if d.get('change_pct', 0) > 0 %}up{% elif d.get('change_pct', 0) < 0 %}down{% endif %}" style="font-weight:700">
+              {% if d.get('change_pct', 0) > 0 %}+{% endif %}{{ "%.2f"|format(d.get('change_pct', 0)) }}%
             </td>
             <td class="text-center {% if d.main_net > 0 %}up{% elif d.main_net < 0 %}down{% endif %}" style="font-weight:700">
               {% if d.main_net > 0 %}+{% endif %}{{ "%.2f"|format(d.main_net / 10000) }}
             </td>
             <td class="text-center {% if d.main_pct > 0 %}up{% elif d.main_pct < 0 %}down{% endif %}">
               {% if d.main_pct > 0 %}+{% endif %}{{ "%.2f"|format(d.main_pct) }}%
-            </td>
-            <td class="text-center {% if d.super_large_net > 0 %}up{% elif d.super_large_net < 0 %}down{% endif %}">
-              {% if d.super_large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.super_large_net / 10000) }}
-            </td>
-            <td class="text-center {% if d.large_net > 0 %}up{% elif d.large_net < 0 %}down{% endif %}">
-              {% if d.large_net > 0 %}+{% endif %}{{ "%.2f"|format(d.large_net / 10000) }}
             </td>
           </tr>
           {% endfor %}
@@ -827,12 +819,22 @@ tr:hover{background:#f5f9ff}
     </div>
   </div>
   {% else %}
-  <div class="insight-box yellow" style="margin:0">
-    <span class="label">💡 数据源说明</span>
-    资金流向数据来自东方财富 push2his 接口（参考页面：<a href="https://data.eastmoney.com/zjlx/{{ stock_code }}.html" target="_blank" rel="noopener" style="color:#1565c0">data.eastmoney.com/zjlx/{{ stock_code }}.html</a>）。
-    当前部署环境 IP 被该接口屏蔽，需要住宅代理或人工补录才能上线。腾讯 K-line 不提供分单资金流数据。
-  </div>
   {% endif %}
+
+  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;gap:12px">
+    <div style="display:flex;gap:12px">
+      <a href="https://stockpage.10jqka.com.cn/{{ stock_code }}/funds/#funds_lszjsj" target="_blank" rel="noopener" style="color:#e8562a;font-size:12px;text-decoration:none">📊 同花顺资金流向 →</a>
+      <a href="https://data.eastmoney.com/zjlx/{{ stock_code }}.html" target="_blank" rel="noopener" style="color:#1565c0;font-size:12px;text-decoration:none">📊 东方财富资金流向 →</a>
+    </div>
+  </div>
+
+  <div class="insight-box yellow" style="margin-bottom:10px">
+    <span class="label">💡 数据说明</span>
+    本报告资金流向数据来自 i 问财（同花顺 DDE 算法），按<strong>订单发起方向</strong>区分主力和散户，
+    与东方财富按<strong>成交单大小</strong>的算法不同。涨停封板时可能因大量买单排队未成交、
+    实际成交以散户主动卖出为主，导致同花顺显示主力流出而东财显示主力流入。
+    建议对比两个平台数据交叉验证。同花顺仅提供最新一日的超大单/大单拆分，历史日期仅有主力总额。
+  </div>
 
   <div class="card">
     <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">最近一次涨停记录</div>
