@@ -147,7 +147,7 @@ export default function SectorList() {
               return (
               <React.Fragment key={p.id}>
                 <tr
-                  style={{ borderBottom: '1px solid #eee', cursor: 'pointer', background: isExpanded ? '#e3f2fd' : undefined }}
+                  style={{ borderBottom: '1px solid #eee', cursor: 'pointer' }}
                   onClick={() => toggleExpand(p.id)}
                 >
                   <td style={{ ...td, fontWeight: 600 }}>
