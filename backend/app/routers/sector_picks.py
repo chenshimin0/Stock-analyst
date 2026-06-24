@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import or_
 from typing import Optional, List
 from datetime import datetime
 
@@ -16,11 +17,29 @@ router = APIRouter(prefix="/sector-picks", tags=["sector-picks"])
 @router.get("", response_model=List[SectorPickListItem])
 def list_sector_picks(
     status: Optional[str] = Query(None, pattern="^(in_progress|completed|archived)$"),
+    search: Optional[str] = Query(None, description="Filter by sector name (LIKE)"),
+    stock: Optional[str] = Query(None, description="Filter by stock code or name"),
     db: Session = Depends(get_db),
 ):
     q = db.query(SectorPick)
     if status:
         q = q.filter(SectorPick.status == status)
+    if search:
+        q = q.filter(SectorPick.sector_name.ilike(f"%{search}%"))
+    if stock:
+        # Subquery: find pick IDs that have matching stock
+        sub = (
+            db.query(SectorPickStock.sector_pick_id)
+            .filter(
+                or_(
+                    SectorPickStock.stock_code.like(f"%{stock}%"),
+                    SectorPickStock.stock_name.ilike(f"%{stock}%"),
+                )
+            )
+            .distinct()
+        )
+        q = q.filter(SectorPick.id.in_(sub))
+
     picks = q.order_by(SectorPick.created_at.desc()).all()
     return [
         SectorPickListItem(
@@ -33,6 +52,19 @@ def list_sector_picks(
             avg_t5_pct=_avg(p.stocks, "t5_pct"),
             avg_t10_pct=_avg(p.stocks, "t10_pct"),
             avg_t20_pct=_avg(p.stocks, "t20_pct"),
+            stocks_preview=[
+                StockMetric(
+                    code=s.stock_code,
+                    name=s.stock_name,
+                    reason=s.selection_reason,
+                    t0_price=s.t0_price,
+                    t3_pct=s.t3_pct,
+                    t5_pct=s.t5_pct,
+                    t10_pct=s.t10_pct,
+                    t20_pct=s.t20_pct,
+                )
+                for s in p.stocks
+            ] if stock else [],
         )
         for p in picks
     ]

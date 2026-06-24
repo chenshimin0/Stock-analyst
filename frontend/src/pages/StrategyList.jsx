@@ -20,6 +20,7 @@ export default function StrategyList() {
   // Filters
   const [selectedStrategy, setSelectedStrategy] = useState(filterStrategyId ? String(filterStrategyId) : '');
   const [selectedDate, setSelectedDate] = useState('');
+  const [stockFilter, setStockFilter] = useState('');
 
   useEffect(() => {
     setLoading(true);
@@ -67,9 +68,17 @@ export default function StrategyList() {
         const d = new Date(p.created_at).toISOString().split('T')[0];
         if (d !== selectedDate) return false;
       }
+      if (stockFilter.trim()) {
+        const q = stockFilter.trim().toLowerCase();
+        const stocks = p.stocks_preview || [];
+        return stocks.some(s =>
+          s.stock_code.toLowerCase().includes(q) ||
+          s.stock_name.toLowerCase().includes(q)
+        );
+      }
       return true;
     });
-  }, [picks, selectedStrategy, selectedDate]);
+  }, [picks, selectedStrategy, selectedDate, stockFilter]);
 
   const strategyName = (id, name) => name || strategies.find(s => s.id === id)?.name || `#${id}`;
 
@@ -147,6 +156,28 @@ export default function StrategyList() {
         <span style={{ fontSize: 12, color: '#888', marginLeft: 4 }}>
           {filteredPicks.length} / {picks.length} 个批次
         </span>
+
+        <div style={{ width: 1, height: 24, background: '#ddd' }} />
+
+        {/* Stock filter */}
+        <input
+          type="text"
+          placeholder="按股票代码/名称筛选..."
+          value={stockFilter}
+          onChange={e => setStockFilter(e.target.value)}
+          style={{
+            padding: '6px 10px', border: '1px solid #ccc', borderRadius: 4,
+            fontSize: 13, width: 180,
+          }}
+        />
+        {stockFilter && (
+          <button onClick={() => setStockFilter('')} style={{
+            padding: '4px 8px', background: '#fff', color: '#666',
+            border: '1px solid #ccc', borderRadius: 4, cursor: 'pointer', fontSize: 12,
+          }}>
+            清除
+          </button>
+        )}
       </div>
 
       {loading && <div>加载中…</div>}

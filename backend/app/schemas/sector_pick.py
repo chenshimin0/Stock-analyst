@@ -44,6 +44,7 @@ class SectorPickListItem(BaseModel):
     avg_t5_pct: Optional[float]
     avg_t10_pct: Optional[float]
     avg_t20_pct: Optional[float]
+    stocks_preview: List[StockMetric] = []
 
 
 class SectorPickDetail(SectorPickListItem):

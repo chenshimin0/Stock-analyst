@@ -13,20 +13,34 @@ export default function SectorList() {
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
 
-  useEffect(() => {
+  // Filters
+  const [searchSector, setSearchSector] = useState('');
+  const [searchStock, setSearchStock] = useState('');
+
+  const load = () => {
     setLoading(true);
     setErr(null);
     const statuses = TABS.find(t => t.key === tab).statuses;
-    Promise.all(statuses.map(s => listSectorPicks(s).catch(() => [])))
+    const params = {};
+    if (searchSector.trim()) params.search = searchSector.trim();
+    if (searchStock.trim()) params.stock = searchStock.trim();
+    Promise.all(statuses.map(s => listSectorPicks(s, params).catch(() => [])))
       .then(arrs => setPicks(arrs.flat()))
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
-  }, [tab]);
+  };
+
+  useEffect(load, [tab]);
+  // Re-fetch when filters change (debounced by the user typing + pressing Enter)
+  const handleSearch = (e) => {
+    e.preventDefault();
+    load();
+  };
 
   return (
     <div style={{ padding: 24 }}>
       <h2 style={{ marginBottom: 16 }}>📊 板块追踪</h2>
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap', alignItems: 'center' }}>
         {TABS.map(t => (
           <button
             key={t.key}
@@ -44,6 +58,44 @@ export default function SectorList() {
           </button>
         ))}
       </div>
+
+      {/* Filter row */}
+      <form onSubmit={handleSearch} style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          type="text"
+          placeholder="按板块名称筛选..."
+          value={searchSector}
+          onChange={e => setSearchSector(e.target.value)}
+          style={{
+            padding: '6px 10px', border: '1px solid #ccc', borderRadius: 4,
+            fontSize: 13, width: 180,
+          }}
+        />
+        <input
+          type="text"
+          placeholder="按股票代码/名称筛选..."
+          value={searchStock}
+          onChange={e => setSearchStock(e.target.value)}
+          style={{
+            padding: '6px 10px', border: '1px solid #ccc', borderRadius: 4,
+            fontSize: 13, width: 180,
+          }}
+        />
+        <button type="submit" style={{
+          padding: '6px 14px', background: '#1565c0', color: '#fff',
+          border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: 13,
+        }}>
+          筛选
+        </button>
+        {(searchSector || searchStock) && (
+          <button type="button" onClick={() => { setSearchSector(''); setSearchStock(''); }} style={{
+            padding: '6px 10px', background: '#fff', color: '#666',
+            border: '1px solid #ccc', borderRadius: 4, cursor: 'pointer', fontSize: 12,
+          }}>
+            清除
+          </button>
+        )}
+      </form>
 
       {loading && <div>加载中…</div>}
       {err && <div style={{ color: 'red' }}>{err}</div>}

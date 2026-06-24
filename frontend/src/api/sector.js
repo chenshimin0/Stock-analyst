@@ -1,7 +1,8 @@
 import client from './client.js';
 
-export async function listSectorPicks(status = null) {
-  const params = status ? { status } : {};
+export async function listSectorPicks(status = null, extraParams = {}) {
+  const params = { ...extraParams };
+  if (status) params.status = status;
   const res = await client.get('/sector-picks', { params });
   return res.data;
 }
