@@ -1,6 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Link } from 'react-router-dom';
-import { listSectorPicks } from '../api/sector.js';
+import React, { useEffect, useState, useCallback } from 'react';
+import { listSectorPicks, getSectorPick } from '../api/sector.js';
 
 const TABS = [
   { key: 'active', label: '进行中', statuses: ['in_progress', 'completed'] },
@@ -16,6 +15,27 @@ export default function SectorList() {
   // Filters
   const [searchSector, setSearchSector] = useState('');
   const [searchStock, setSearchStock] = useState('');
+
+  // Expand/collapse detail
+  const [expandedId, setExpandedId] = useState(null);
+  const [detailCache, setDetailCache] = useState({});  // id -> { loading, data, error }
+
+  const toggleExpand = useCallback(async (id) => {
+    if (expandedId === id) {
+      setExpandedId(null);
+      return;
+    }
+    setExpandedId(id);
+    if (!detailCache[id]) {
+      setDetailCache(prev => ({ ...prev, [id]: { loading: true, data: null, error: null } }));
+      try {
+        const data = await getSectorPick(id);
+        setDetailCache(prev => ({ ...prev, [id]: { loading: false, data, error: null } }));
+      } catch (e) {
+        setDetailCache(prev => ({ ...prev, [id]: { loading: false, data: null, error: e.message } }));
+      }
+    }
+  }, [expandedId, detailCache]);
 
   const load = () => {
     setLoading(true);
@@ -121,20 +141,70 @@ export default function SectorList() {
             </tr>
           </thead>
           <tbody>
-            {picks.map(p => (
-              <tr key={p.id} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={td}>
-                  <Link to={`/sector-tracker/${p.id}`}>{p.sector_name}</Link>
-                </td>
-                <td style={td}><StatusBadge status={p.status} /></td>
-                <td style={td}>{p.selection_source === 'api_driven' ? 'API 实时' : 'AI 知识'}</td>
-                <td style={td}>{new Date(p.created_at).toLocaleString()}</td>
-                <td style={td}><Pct value={p.avg_t3_pct} /></td>
-                <td style={td}><Pct value={p.avg_t5_pct} /></td>
-                <td style={td}><Pct value={p.avg_t10_pct} /></td>
-                <td style={td}><Pct value={p.avg_t20_pct} /></td>
-              </tr>
-            ))}
+            {picks.map(p => {
+              const isExpanded = expandedId === p.id;
+              const detail = detailCache[p.id];
+              return (
+              <React.Fragment key={p.id}>
+                <tr
+                  style={{ borderBottom: '1px solid #eee', cursor: 'pointer', background: isExpanded ? '#e3f2fd' : undefined }}
+                  onClick={() => toggleExpand(p.id)}
+                >
+                  <td style={{ ...td, fontWeight: 600 }}>
+                    <span style={{ marginRight: 6 }}>{isExpanded ? '▾' : '▸'}</span>
+                    {p.sector_name}
+                  </td>
+                  <td style={td}><StatusBadge status={p.status} /></td>
+                  <td style={td}>{p.selection_source === 'api_driven' ? 'API 实时' : 'AI 知识'}</td>
+                  <td style={td}>{new Date(p.created_at).toLocaleString()}</td>
+                  <td style={td}><Pct value={p.avg_t3_pct} /></td>
+                  <td style={td}><Pct value={p.avg_t5_pct} /></td>
+                  <td style={td}><Pct value={p.avg_t10_pct} /></td>
+                  <td style={td}><Pct value={p.avg_t20_pct} /></td>
+                </tr>
+                {isExpanded && (
+                  <tr>
+                    <td colSpan={8} style={{ padding: '12px 20px', background: '#f9fafb' }}>
+                      {detail?.loading ? (
+                        <div style={{ color: '#888', padding: 16 }}>加载中…</div>
+                      ) : detail?.error ? (
+                        <div style={{ color: '#d32f2f', padding: 16 }}>加载失败: {detail.error}</div>
+                      ) : detail?.data ? (
+                        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
+                          <thead>
+                            <tr style={{ background: '#e8eaf0' }}>
+                              <th style={{...th, color:'#333'}}>代码</th>
+                              <th style={{...th, color:'#333'}}>名称</th>
+                              <th style={{...th, color:'#333'}}>入选理由</th>
+                              <th style={{...th, color:'#333'}}>T0价</th>
+                              <th style={{...th, color:'#333'}}>T+3</th>
+                              <th style={{...th, color:'#333'}}>T+5</th>
+                              <th style={{...th, color:'#333'}}>T+10</th>
+                              <th style={{...th, color:'#333'}}>T+20</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {detail.data.stocks.map((s, i) => (
+                              <tr key={i} style={{ borderBottom: '1px solid #e8eaf0', background: i%2===0?'#fff':'#f9fafb' }}>
+                                <td style={td}><code>{s.code}</code></td>
+                                <td style={{...td, fontWeight:600}}>{s.name}</td>
+                                <td style={{...td, fontSize:12, color:'#666'}}>{s.reason || '—'}</td>
+                                <td style={td}>{s.t0_price != null ? s.t0_price.toFixed(2) : '—'}</td>
+                                <td style={td}><Pct value={s.t3_pct} /></td>
+                                <td style={td}><Pct value={s.t5_pct} /></td>
+                                <td style={td}><Pct value={s.t10_pct} /></td>
+                                <td style={td}><Pct value={s.t20_pct} /></td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      ) : null}
+                    </td>
+                  </tr>
+                )}
+              </React.Fragment>
+              );
+            })}
           </tbody>
         </table>
       )}
