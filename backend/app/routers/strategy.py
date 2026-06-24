@@ -10,6 +10,7 @@ from app.schemas import (
     StrategyPickListItem,
     StrategyPickDetail,
     StrategyStockMetric,
+    PaginatedStrategyPicks,
 )
 
 router = APIRouter(prefix="/strategy-picks", tags=["strategy-picks"])
@@ -40,19 +41,23 @@ def _to_stock_metric(s: StrategyPickStock) -> StrategyStockMetric:
     )
 
 
-@router.get("", response_model=list[StrategyPickListItem])
+@router.get("", response_model=PaginatedStrategyPicks)
 def list_strategy_picks(
     status: Optional[str] = Query(None, pattern="^(in_progress|completed|archived)$"),
     strategy_id: Optional[int] = Query(None, ge=1),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """List strategy picks. Filter by status and/or strategy_id."""
+    """List strategy picks. Filter by status and/or strategy_id. Paginated."""
     q = db.query(StrategyPick)
     if status:
         q = q.filter(StrategyPick.status == status)
     if strategy_id is not None:
         q = q.filter(StrategyPick.strategy_id == strategy_id)
-    picks = q.order_by(StrategyPick.created_at.desc()).all()
+
+    total = q.count()
+    picks = q.order_by(StrategyPick.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
 
     # Bulk-resolve strategy definitions in one query (avoid N+1)
     strat_ids = {p.strategy_id for p in picks}
@@ -60,10 +65,10 @@ def list_strategy_picks(
         s.id: s for s in db.query(Strategy).filter(Strategy.id.in_(strat_ids)).all()
     } if strat_ids else {}
 
-    out = []
+    items = []
     for p in picks:
         s_def = strat_map.get(p.strategy_id)
-        out.append(StrategyPickListItem(
+        items.append(StrategyPickListItem(
             id=p.id,
             strategy_id=p.strategy_id,
             status=p.status,
@@ -79,7 +84,7 @@ def list_strategy_picks(
             avg_t15_pct=_avg(p.stocks, "t15_pct"),
             avg_t30_pct=_avg(p.stocks, "t30_pct"),
         ))
-    return out
+    return PaginatedStrategyPicks(items=items, total=total, page=page, page_size=page_size)
 
 
 @router.get("/{pick_id}", response_model=StrategyPickDetail)

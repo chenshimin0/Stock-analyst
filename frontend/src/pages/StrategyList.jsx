@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { listStrategyPicks, deleteStrategyPick, deleteStockRow } from '../api/strategy.js';
 import { listStrategies } from '../api/strategies.js';
@@ -21,22 +21,40 @@ export default function StrategyList() {
   const [selectedStrategy, setSelectedStrategy] = useState(filterStrategyId ? String(filterStrategyId) : '');
   const [selectedDate, setSelectedDate] = useState('');
   const [stockFilter, setStockFilter] = useState('');
+  const pageSize = 10;
 
-  useEffect(() => {
+  // Pagination
+  const [page, setPage] = useState(1);
+  const [totalItems, setTotalItems] = useState(0);
+  const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
+
+  const load = useCallback(() => {
     setLoading(true);
     setErr(null);
     const statuses = TABS.find(t => t.key === tab).statuses;
-    // Fetch all picks (no strategy filter) so we can derive dates client-side
-    const pickPromises = statuses.map(s => listStrategyPicks(s).catch(() => []));
+    const params = { page, page_size: pageSize };
+    if (selectedStrategy) params.strategy_id = Number(selectedStrategy);
+
+    const pickPromises = statuses.map(s => listStrategyPicks(s, params).catch(() => ({ items: [], total: 0 })));
     Promise.all([...pickPromises, listStrategies().catch(() => [])])
       .then((results) => {
         const strats = results.pop();
-        setPicks(results.flat());
+        const allResults = results;
+        // Merge results from multiple statuses
+        const items = allResults.flatMap(r => r.items);
+        const total = allResults.reduce((sum, r) => sum + r.total, 0);
+        setPicks(items);
+        setTotalItems(total);
         setStrategies(strats);
       })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
-  }, [tab]);
+  }, [tab, selectedStrategy, page]);
+
+  useEffect(load, [load]);
+
+  // Reset page when tab or strategy changes
+  useEffect(() => { setPage(1); }, [tab, selectedStrategy]);
 
   // Set initial strategy from URL param
   useEffect(() => {
@@ -44,26 +62,16 @@ export default function StrategyList() {
   }, [filterStrategyId]);
 
   // --- Derived data ---
-  // All unique dates from picks (sorted newest first)
+  // All unique dates from picks (current page)
   const allDates = useMemo(() => {
     return [...new Set(picks.map(p => {
       return new Date(p.created_at).toISOString().split('T')[0];
     }))].sort().reverse();
   }, [picks]);
 
-  // Dates that have data for the currently selected strategy
-  const strategyDates = useMemo(() => {
-    if (!selectedStrategy) return new Set(allDates);
-    return new Set(picks
-      .filter(p => p.strategy_id === Number(selectedStrategy))
-      .map(p => new Date(p.created_at).toISOString().split('T')[0])
-    );
-  }, [picks, selectedStrategy, allDates]);
-
-  // Filtered picks
+  // Filtered picks (date + stock are client-side, strategy is server-side)
   const filteredPicks = useMemo(() => {
     return picks.filter(p => {
-      if (selectedStrategy && p.strategy_id !== Number(selectedStrategy)) return false;
       if (selectedDate) {
         const d = new Date(p.created_at).toISOString().split('T')[0];
         if (d !== selectedDate) return false;
@@ -78,7 +86,7 @@ export default function StrategyList() {
       }
       return true;
     });
-  }, [picks, selectedStrategy, selectedDate, stockFilter]);
+  }, [picks, selectedDate, stockFilter]);
 
   const strategyName = (id, name) => name || strategies.find(s => s.id === id)?.name || `#${id}`;
 
@@ -133,28 +141,14 @@ export default function StrategyList() {
           }}
         >
           <option value="">全部日期</option>
-          {allDates.map(d => {
-            const hasData = strategyDates.has(d);
-            return (
-              <option
-                key={d}
-                value={d}
-                disabled={!hasData}
-                style={{
-                  color: hasData ? '#000' : '#ccc',
-                  fontWeight: hasData ? 600 : 400,
-                  background: hasData ? '#e8f5e9' : undefined,
-                }}
-              >
-                {d}{hasData ? ' ✓' : ' (无数据)'}
-              </option>
-            );
-          })}
+          {allDates.map(d => (
+            <option key={d} value={d}>{d}</option>
+          ))}
         </select>
 
         {/* Result count */}
         <span style={{ fontSize: 12, color: '#888', marginLeft: 4 }}>
-          {filteredPicks.length} / {picks.length} 个批次
+          {totalItems} 个批次（第 {page}/{totalPages} 页）
         </span>
 
         <div style={{ width: 1, height: 24, background: '#ddd' }} />
@@ -194,17 +188,47 @@ export default function StrategyList() {
       )}
 
       {!loading && filteredPicks.length > 0 && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-          {filteredPicks.map(p => (
-            <PickCard
-              key={p.id}
-              pick={p}
-              stockFilter={stockFilter}
-              strategyName={strategyName}
-              onDeleted={(id) => setPicks(prev => prev.filter(x => x.id !== id))}
-            />
-          ))}
-        </div>
+        <>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+            {filteredPicks.map(p => (
+              <PickCard
+                key={p.id}
+                pick={p}
+                stockFilter={stockFilter}
+                strategyName={strategyName}
+                onDeleted={(id) => setPicks(prev => prev.filter(x => x.id !== id))}
+              />
+            ))}
+          </div>
+
+          {totalPages > 1 && (
+            <div style={{ display: 'flex', justifyContent: 'center', gap: 12, marginTop: 20, alignItems: 'center' }}>
+              <button
+                onClick={() => setPage(p => Math.max(1, p - 1))}
+                disabled={page <= 1}
+                style={{
+                  padding: '6px 14px', border: '1px solid #ccc', borderRadius: 4,
+                  cursor: page <= 1 ? 'not-allowed' : 'pointer', opacity: page <= 1 ? 0.4 : 1,
+                }}
+              >
+                上一页
+              </button>
+              <span style={{ fontSize: 13, color: '#666' }}>
+                {page} / {totalPages}
+              </span>
+              <button
+                onClick={() => setPage(p => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages}
+                style={{
+                  padding: '6px 14px', border: '1px solid #ccc', borderRadius: 4,
+                  cursor: page >= totalPages ? 'not-allowed' : 'pointer', opacity: page >= totalPages ? 0.4 : 1,
+                }}
+              >
+                下一页
+              </button>
+            </div>
+          )}
+        </>
       )}
     </div>
   );

@@ -212,6 +212,13 @@ class StrategyPickDetail(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PaginatedStrategyPicks(BaseModel):
+    items: list[StrategyPickListItem]
+    total: int
+    page: int
+    page_size: int
+
+
 # =========================================================================
 # Strategy (definition) — multi-strategy support
 # =========================================================================

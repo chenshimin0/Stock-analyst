@@ -1,9 +1,8 @@
 import client from './client.js';
 
-export async function listStrategyPicks(status = null, strategyId = null) {
-  const params = {};
+export async function listStrategyPicks(status = null, extraParams = {}) {
+  const params = { ...extraParams };
   if (status) params.status = status;
-  if (strategyId) params.strategy_id = strategyId;
   const res = await client.get('/strategy-picks', { params });
   return res.data;
 }
