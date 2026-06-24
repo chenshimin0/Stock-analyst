@@ -1,3 +1,4 @@
+import logging
 import re
 from datetime import date, timedelta
 from typing import Optional
@@ -7,6 +8,14 @@ from app.models import Report
 from app.schemas import ReportCreate
 from app.services.price_service import PriceService
 from pypinyin import pinyin, Style
+
+logger = logging.getLogger("report_service")
+# Ensure logger output reaches journalctl / stderr
+if not logger.handlers:
+    h = logging.StreamHandler()
+    h.setFormatter(logging.Formatter("%(levelname)s: %(name)s: %(message)s"))
+    logger.addHandler(h)
+    logger.setLevel(logging.INFO)
 
 
 def _make_slug(stock_code: str, name: str = "") -> str:
@@ -373,3 +382,102 @@ class ReportService:
             "created_at": report.created_at,
             "realtime": price_data,
         }
+
+    # ------------------------------------------------------------------
+    # Lazy-refresh: update fund flow & limit-up on every report view
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _latest_trading_day() -> date:
+        """Return the most recent completed trading day (Mon-Fri)."""
+        from datetime import datetime, time, timezone, timedelta
+        cst = timezone(timedelta(hours=8))
+        now = datetime.now(cst)
+        today = now.date()
+        # If today is a weekday and market has closed (after 15:00), today counts
+        if today.weekday() < 5 and now.time() >= time(15, 0):
+            return today
+        # Otherwise go back to the most recent weekday
+        d = today - timedelta(days=1)
+        while d.weekday() >= 5:  # Sat=5, Sun=6
+            d -= timedelta(days=1)
+        return d
+
+    @staticmethod
+    def refresh_fund_flow_if_stale(db: Session, report: "Report") -> bool:
+        """Refresh fund_flow_recent + last_limit_up_date if not yet refreshed today.
+
+        Guarded by fund_flow_refreshed_at: only refreshes once per calendar day.
+        On success, updates fund_flow_recent, last_limit_up_date, last_limit_up_days_ago.
+        On failure, still sets the timestamp to avoid retrying every request.
+
+        Returns True if data was refreshed and saved, False otherwise.
+        """
+        import json
+        import sys
+        import os
+
+        today = date.today()
+
+        # Already refreshed today — skip
+        if report.fund_flow_refreshed_at and report.fund_flow_refreshed_at >= today:
+            return False
+
+        logger.info(
+            "Fund flow refresh for %s (last refreshed: %s)",
+            report.stock_code, report.fund_flow_refreshed_at or "never",
+        )
+
+        # --- Refresh ---
+        try:
+            # bot/ is 4 dir-levels up from this file
+            bot_dir = os.path.join(
+                os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(__file__)))),
+                "bot",
+            )
+            if bot_dir not in sys.path:
+                sys.path.insert(0, bot_dir)
+
+            from astock_data import get_fund_flow_recent, get_last_limit_up_from_pywencai
+
+            code = report.stock_code
+
+            fund_flow_recent = get_fund_flow_recent(code, days=5)
+            last_limit_up_date = get_last_limit_up_from_pywencai(code)
+            last_limit_up_days_ago = None
+            if last_limit_up_date:
+                try:
+                    lud = date.fromisoformat(last_limit_up_date)
+                    # Count trading days (weekdays) from limit-up to today
+                    day_count = 0
+                    cur = lud
+                    while cur <= today:
+                        if cur.weekday() < 5:
+                            day_count += 1
+                        cur += timedelta(days=1)
+                    last_limit_up_days_ago = day_count
+                except Exception:
+                    pass
+
+            # Update report
+            report.fund_flow_recent = fund_flow_recent
+            report.fund_flow_refreshed_at = today
+            report.last_limit_up_date = last_limit_up_date
+            report.last_limit_up_days_ago = last_limit_up_days_ago
+            db.commit()
+            db.refresh(report)
+
+            logger.info(
+                "Fund flow refreshed for %s: %d days, last_limit_up=%s",
+                code, len(fund_flow_recent), last_limit_up_date,
+            )
+            return True
+        except Exception as e:
+            logger.warning("Fund flow refresh failed for %s: %s", report.stock_code, e)
+            # Set refreshed_at even on failure — don't retry every request
+            try:
+                report.fund_flow_refreshed_at = today
+                db.commit()
+            except Exception:
+                pass
+            return False
