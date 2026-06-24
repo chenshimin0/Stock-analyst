@@ -199,6 +199,7 @@ export default function StrategyList() {
             <PickCard
               key={p.id}
               pick={p}
+              stockFilter={stockFilter}
               strategyName={strategyName}
               onDeleted={(id) => setPicks(prev => prev.filter(x => x.id !== id))}
             />
@@ -209,9 +210,12 @@ export default function StrategyList() {
   );
 }
 
-function PickCard({ pick, strategyName, onDeleted }) {
+function PickCard({ pick, stockFilter, strategyName, onDeleted }) {
   const preview = pick.stocks_preview || [];
   const hidden = pick.hit_count - preview.length;
+
+  const q = (stockFilter || '').trim().toLowerCase();
+  const isMatch = (s) => !q || s.stock_code.toLowerCase().includes(q) || s.stock_name.toLowerCase().includes(q);
 
   const handleDeleteStock = async (stockId, stockName) => {
     if (!confirm(`确认从批次 #${pick.id} 中删除 ${stockName}？`)) return;
@@ -298,14 +302,16 @@ function PickCard({ pick, strategyName, onDeleted }) {
             </tr>
           </thead>
           <tbody>
-            {preview.map((s, i) => (
+            {preview.map((s, i) => {
+              const matched = isMatch(s);
+              return (
               <tr key={s.id} style={{
                 borderBottom: '1px solid #1e293b',
-                background: i % 2 === 0 ? '#0f172a' : '#1a2236',
+                background: matched ? 'rgba(234,179,8,0.15)' : i % 2 === 0 ? '#0f172a' : '#1a2236',
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={e => e.currentTarget.style.background = '#1e3a5f'}
-              onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? '#0f172a' : '#1a2236'}
+              onMouseEnter={e => e.currentTarget.style.background = matched ? 'rgba(234,179,8,0.25)' : '#1e3a5f'}
+              onMouseLeave={e => e.currentTarget.style.background = matched ? 'rgba(234,179,8,0.15)' : i % 2 === 0 ? '#0f172a' : '#1a2236'}
               >
                 <td style={td}><a href={`https://www.iwencai.com/screener/result?w=${encodeURIComponent(s.stock_name)}`} target="_blank" rel="noopener" style={{ textDecoration: 'none' }} title={`在 i 问财查看 ${s.stock_name}`}><code style={{ fontSize: 12, color: '#93c5fd' }}>{s.stock_code}</code></a></td>
                 <td style={{ ...td, fontWeight: 600, color: '#f0f6fc' }}>{s.stock_name}</td>
@@ -324,7 +330,8 @@ function PickCard({ pick, strategyName, onDeleted }) {
                   >✕</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       ) : (
