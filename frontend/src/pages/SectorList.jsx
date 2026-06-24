@@ -172,23 +172,23 @@ export default function SectorList() {
                       ) : detail?.data ? (
                         <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
                           <thead>
-                            <tr style={{ background: '#e8eaf0' }}>
-                              <th style={{...th, color:'#333'}}>代码</th>
-                              <th style={{...th, color:'#333'}}>名称</th>
-                              <th style={{...th, color:'#333'}}>入选理由</th>
-                              <th style={{...th, color:'#333'}}>T0价</th>
-                              <th style={{...th, color:'#333'}}>T+3</th>
-                              <th style={{...th, color:'#333'}}>T+5</th>
-                              <th style={{...th, color:'#333'}}>T+10</th>
-                              <th style={{...th, color:'#333'}}>T+20</th>
+                            <tr style={{ background: '#37474f' }}>
+                              <th style={th}>代码</th>
+                              <th style={th}>名称</th>
+                              <th style={th}>入选理由</th>
+                              <th style={th}>T0价</th>
+                              <th style={th}>T+3</th>
+                              <th style={th}>T+5</th>
+                              <th style={th}>T+10</th>
+                              <th style={th}>T+20</th>
                             </tr>
                           </thead>
                           <tbody>
                             {detail.data.stocks.map((s, i) => (
                               <tr key={i} style={{ borderBottom: '1px solid #e8eaf0' }}>
-                                <td style={td}><code>{s.code}</code></td>
+                                <td style={td}><span style={{fontFamily:'monospace',fontSize:13}}>{s.code}</span></td>
                                 <td style={{...td, fontWeight:600}}>{s.name}</td>
-                                <td style={{...td, fontSize:12, color:'#666'}}>{s.reason || '—'}</td>
+                                <td style={{...td, fontSize:12}}>{s.reason || '—'}</td>
                                 <td style={td}>{s.t0_price != null ? s.t0_price.toFixed(2) : '—'}</td>
                                 <td style={td}><Pct value={s.t3_pct} /></td>
                                 <td style={td}><Pct value={s.t5_pct} /></td>
