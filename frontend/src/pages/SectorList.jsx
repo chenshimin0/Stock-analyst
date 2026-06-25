@@ -16,16 +16,19 @@ export default function SectorList() {
   const [searchSector, setSearchSector] = useState('');
   const [searchStock, setSearchStock] = useState('');
 
-  // Expand/collapse detail
-  const [expandedId, setExpandedId] = useState(null);
+  // Expand/collapse detail (multiple allowed)
+  const [expandedIds, setExpandedIds] = useState(new Set());
   const [detailCache, setDetailCache] = useState({});  // id -> { loading, data, error }
 
   const toggleExpand = useCallback(async (id) => {
-    if (expandedId === id) {
-      setExpandedId(null);
+    const next = new Set(expandedIds);
+    if (next.has(id)) {
+      next.delete(id);
+      setExpandedIds(next);
       return;
     }
-    setExpandedId(id);
+    next.add(id);
+    setExpandedIds(next);
     if (!detailCache[id]) {
       setDetailCache(prev => ({ ...prev, [id]: { loading: true, data: null, error: null } }));
       try {
@@ -35,14 +38,16 @@ export default function SectorList() {
         setDetailCache(prev => ({ ...prev, [id]: { loading: false, data: null, error: e.message } }));
       }
     }
-  }, [expandedId, detailCache]);
+  }, [expandedIds, detailCache]);
 
   const handleDelete = async (id, name) => {
     if (!confirm(`确认删除板块 "${name}" 及其追踪数据？`)) return;
     try {
       await deleteSectorPick(id);
       setPicks(prev => prev.filter(p => p.id !== id));
-      if (expandedId === id) setExpandedId(null);
+      const next = new Set(expandedIds);
+      next.delete(id);
+      setExpandedIds(next);
     } catch (e) {
       alert(`删除失败：${e.message}`);
     }
@@ -154,7 +159,7 @@ export default function SectorList() {
           </thead>
           <tbody>
             {picks.map(p => {
-              const isExpanded = expandedId === p.id;
+              const isExpanded = expandedIds.has(p.id);
               const detail = detailCache[p.id];
               return (
               <React.Fragment key={p.id}>
