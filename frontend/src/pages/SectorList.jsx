@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { listSectorPicks, getSectorPick } from '../api/sector.js';
+import { listSectorPicks, getSectorPick, deleteSectorPick } from '../api/sector.js';
 
 const TABS = [
   { key: 'active', label: '进行中', statuses: ['in_progress', 'completed'] },
@@ -36,6 +36,17 @@ export default function SectorList() {
       }
     }
   }, [expandedId, detailCache]);
+
+  const handleDelete = async (id, name) => {
+    if (!confirm(`确认删除板块 "${name}" 及其追踪数据？`)) return;
+    try {
+      await deleteSectorPick(id);
+      setPicks(prev => prev.filter(p => p.id !== id));
+      if (expandedId === id) setExpandedId(null);
+    } catch (e) {
+      alert(`删除失败：${e.message}`);
+    }
+  };
 
   const load = () => {
     setLoading(true);
@@ -138,6 +149,7 @@ export default function SectorList() {
               <th style={th}>板块 T+5</th>
               <th style={th}>板块 T+10</th>
               <th style={th}>板块 T+20</th>
+              <th style={{...th, width: 50}}></th>
             </tr>
           </thead>
           <tbody>
@@ -161,10 +173,21 @@ export default function SectorList() {
                   <td style={td}><Pct value={p.avg_t5_pct} /></td>
                   <td style={td}><Pct value={p.avg_t10_pct} /></td>
                   <td style={td}><Pct value={p.avg_t20_pct} /></td>
+                  <td style={{...td, padding: '4px'}} onClick={e => e.stopPropagation()}>
+                    <button
+                      onClick={() => handleDelete(p.id, p.sector_name)}
+                      title="删除板块"
+                      style={{
+                        background: 'rgba(211,47,47,0.1)', color: '#d32f2f',
+                        border: '1px solid rgba(211,47,47,0.3)', borderRadius: 4,
+                        cursor: 'pointer', fontSize: 13, padding: '2px 6px', lineHeight: 1,
+                      }}
+                    >✕</button>
+                  </td>
                 </tr>
                 {isExpanded && (
                   <tr>
-                    <td colSpan={8} style={{ padding: '12px 20px' }}>
+                    <td colSpan={9} style={{ padding: '12px 20px' }}>
                       {detail?.loading ? (
                         <div style={{ color: '#888', padding: 16 }}>加载中…</div>
                       ) : detail?.error ? (
