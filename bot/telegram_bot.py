@@ -89,6 +89,29 @@ NAME_TO_CODE = {
     "金徽酒": "603919",
 }
 
+# Dynamic name→code cache (loaded from mootdx at startup)
+_NAME_CODE_CACHE: dict = {}
+
+
+def _load_name_cache():
+    """Load all A-share stock names from mootdx into NAME_CODE_CACHE."""
+    global _NAME_CODE_CACHE
+    if _NAME_CODE_CACHE:
+        return
+    try:
+        from mootdx.quotes import Quotes
+        client = Quotes.factory(market="std")
+        df = client.stocks(market=1)
+        if df is not None and not df.empty:
+            for _, row in df.iterrows():
+                name = str(row.get("name", "")).strip()
+                code = str(row.get("code", "")).strip()
+                if name and code and len(code) == 6 and code[0] in "0368":
+                    _NAME_CODE_CACHE[name] = code
+            logger.info(f"Name cache loaded: {len(_NAME_CODE_CACHE)} stocks")
+    except Exception as e:
+        logger.warning(f"Failed to load name cache from mootdx: {e}")
+
 # Market spot cache
 _SPOT_CACHE = None
 _SPOT_CACHE_TTL = 10
@@ -182,13 +205,18 @@ def _resolve_codes(text: str) -> list:
     for name, code in NAME_TO_CODE.items():
         if name in text:
             return [code]
-    # Fallback: search via Tencent suggest API by stock name
+    # Check mootdx name cache
+    if _NAME_CODE_CACHE:
+        for name, code in _NAME_CODE_CACHE.items():
+            if name in text:
+                logger.info(f"Name resolved from cache: {name} → {code}")
+                return [code]
+    # Fallback: Tencent suggest API
     try:
         url = f"http://suggest3.sinajs.cn/suggest/type=11&key={urllib.parse.quote(text)}"
         req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn/"})
         resp = urllib.request.urlopen(req, timeout=5)
         raw = resp.read().decode("gbk", errors="replace")
-        # Format: var suggestvalue="name,11,code,shcode,..."
         m = re.search(r'"([^"]+),11,(\d{6}),', raw)
         if m:
             name = m.group(1)
@@ -627,7 +655,9 @@ def main():
     app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
 
     logger.info("Bot v2 starting (thin client mode — queues to Claude Code skills)...")
-    app.run_polling(allowed_updates=Update.ALL_TYPES)
+    # Pre-load stock name cache from mootdx
+    _load_name_cache()
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
 
 
 if __name__ == "__main__":
