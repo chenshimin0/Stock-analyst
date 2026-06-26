@@ -177,9 +177,31 @@ def _resolve_codes(text: str) -> list:
     codes = STOCK_CODE_RE.findall(text)
     if codes:
         return list(dict.fromkeys(codes))
+    # Check hardcoded name map first
     for name, code in NAME_TO_CODE.items():
         if name in text:
             return [code]
+    # Fallback: search full A-share spot data by name
+    if _AK_AVAILABLE:
+        try:
+            df = _get_spot_df()
+            if df is not None and not df.empty:
+                # Collect all names that appear in the text, prefer longer matches
+                matches = []
+                for _, row in df.iterrows():
+                    stock_name = str(row.get("名称", ""))
+                    if stock_name and stock_name in text:
+                        code = str(row.get("代码", ""))
+                        if code:
+                            matches.append((len(stock_name), code, stock_name))
+                if matches:
+                    # Pick the longest name match (most specific)
+                    matches.sort(key=lambda x: x[0], reverse=True)
+                    _, code, name = matches[0]
+                    logger.info(f"Name resolved from spot: {name} → {code} ({len(matches)} candidates)")
+                    return [code]
+        except Exception as e:
+            logger.warning(f"Name fallback lookup failed: {e}")
     return []
 
 
