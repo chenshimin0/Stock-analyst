@@ -15,6 +15,7 @@ import re
 import sys
 import time
 import urllib.request
+import urllib.parse
 from datetime import datetime, date
 from pathlib import Path
 from typing import Optional
@@ -181,27 +182,21 @@ def _resolve_codes(text: str) -> list:
     for name, code in NAME_TO_CODE.items():
         if name in text:
             return [code]
-    # Fallback: search full A-share spot data by name
-    if _AK_AVAILABLE:
-        try:
-            df = _get_spot_df()
-            if df is not None and not df.empty:
-                # Collect all names that appear in the text, prefer longer matches
-                matches = []
-                for _, row in df.iterrows():
-                    stock_name = str(row.get("名称", ""))
-                    if stock_name and stock_name in text:
-                        code = str(row.get("代码", ""))
-                        if code:
-                            matches.append((len(stock_name), code, stock_name))
-                if matches:
-                    # Pick the longest name match (most specific)
-                    matches.sort(key=lambda x: x[0], reverse=True)
-                    _, code, name = matches[0]
-                    logger.info(f"Name resolved from spot: {name} → {code} ({len(matches)} candidates)")
-                    return [code]
-        except Exception as e:
-            logger.warning(f"Name fallback lookup failed: {e}")
+    # Fallback: search via Tencent suggest API by stock name
+    try:
+        url = f"http://suggest3.sinajs.cn/suggest/type=11&key={urllib.parse.quote(text)}"
+        req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn/"})
+        resp = urllib.request.urlopen(req, timeout=5)
+        raw = resp.read().decode("gbk", errors="replace")
+        # Format: var suggestvalue="name,11,code,shcode,..."
+        m = re.search(r'"([^"]+),11,(\d{6}),', raw)
+        if m:
+            name = m.group(1)
+            code = m.group(2)
+            logger.info(f"Name resolved via Tencent suggest: {name} → {code}")
+            return [code]
+    except Exception as e:
+        logger.warning(f"Tencent suggest lookup failed: {e}")
     return []
 
 
