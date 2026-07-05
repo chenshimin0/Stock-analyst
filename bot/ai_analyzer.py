@@ -40,10 +40,7 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
 - 量比(5/20日): {vol_ratio}
 - 20日高点: {resistance}  20日低点: {support}
 
-## 最近新闻（系统抓取，可能不全 — 请用你的知识补充你可能知道的该股票近期重要新闻/事件，30-80字每条）
-{news_text}
-
-## 订单/合同公告（系统抓取，可能不全 — 请用你的知识补充你可能知道的该股票近期重大订单/合同，包括金额、客户、时间）
+## 订单/合同公告（请用你的知识补充你可能知道的该股票近期重大订单/合同，包括金额、客户、时间）
 {order_news_text}
 
 ## 资金流向
@@ -242,7 +239,7 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
 """
 
 
-def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, news: list, kline: list = None, order_news: list = None, data_10jqka: dict = None, financial_data: dict = None, peer_comparison: dict = None, revenue_composition: dict = None) -> str:
+def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, kline: list = None, order_news: list = None, data_10jqka: dict = None, financial_data: dict = None, peer_comparison: dict = None, revenue_composition: dict = None) -> str:
 	"""构建分析 prompt"""
 	name = quote.get("name", "")
 	code = quote.get("code", "")
@@ -256,22 +253,6 @@ def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, news: list, kline
 		lines = [f"{k['date']}: O={k['open']:.2f} H={k['high']:.2f} L={k['low']:.2f} C={k['close']:.2f} V={k['volume']:.0f}"
 		         for k in recent]
 		kline_text = "\n".join(lines)
-
-	# 格式化新闻（含内容摘要）
-	news_text = "暂无新闻数据"
-	if news:
-		lines = []
-		for i, n in enumerate(news[:10]):
-			title = n.get('title', '')
-			source = n.get('source', '资讯')
-			content = n.get('content', '')
-			date = n.get('date', '')
-			date_str = f" [{date[:10]}]" if date else ""
-			lines.append(f"{i+1}. [{source}{date_str}] {title}")
-			if content:
-				content_short = content[:200].replace('\n', ' ')
-				lines.append(f"   摘要: {content_short}")
-		news_text = "\n".join(lines) if lines else "暂无新闻数据"
 
 	# 格式化订单/合同新闻
 	order_news_text = "暂无订单/合同相关公告"
@@ -435,7 +416,6 @@ def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, news: list, kline
 		vol_ratio=ind.get("vol_ratio", "N/A"),
 		resistance=ind.get("resistance", "N/A"),
 		support=ind.get("support", "N/A"),
-		news_text=news_text,
 		order_news_text=order_news_text,
 		fund_flow_text=fund_text,
 		kline_summary=kline_text,
@@ -486,10 +466,10 @@ def _parse_json_robust(text: str) -> dict:
 	return json.loads(repaired)
 
 
-def analyze_stock(quote: dict, ind: dict, flow: dict, news: list, kline: list = None, order_news: list = None, data_10jqka: dict = None, financial_data: dict = None, peer_comparison: dict = None, revenue_composition: dict = None) -> dict:
+def analyze_stock(quote: dict, ind: dict, flow: dict, kline: list = None, order_news: list = None, data_10jqka: dict = None, financial_data: dict = None, peer_comparison: dict = None, revenue_composition: dict = None) -> dict:
 	"""调用 DeepSeek API 进行深度分析，返回完整的分析数据 dict"""
 	api_key = load_api_key("QWEN_ENC_KEY")
-	prompt = _build_analysis_prompt(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
+	prompt = _build_analysis_prompt(quote, ind, flow, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
 
 	payload = json.dumps({
 		"model": MODEL,
@@ -884,10 +864,7 @@ _NATURAL_PROMPT = """你是一位资深A股分析师。请基于以下真实数�
 ## 行业对比数据
 {industry_compare_text}
 
-## 近期新闻
-{news_text}
-
-## 订单/合同公告
+## 订单/合同公告（请用你的知识补充你可能知道的该股票近期重大订单/合同，包括金额、客户、时间）
 {order_news_text}
 
 ---
@@ -952,7 +929,7 @@ _SECTION_MAP = {
 }
 
 
-def analyze_stock_natural(quote: dict, ind: dict, flow: dict, news: list,
+def analyze_stock_natural(quote: dict, ind: dict, flow: dict,
                            kline: list = None, order_news: list = None,
                            data_10jqka: dict = None, financial_data: dict = None,
                            peer_comparison: dict = None,
@@ -962,7 +939,7 @@ def analyze_stock_natural(quote: dict, ind: dict, flow: dict, news: list,
     Returns parsed dict compatible with existing ai_analysis structure.
     """
     api_key = load_api_key("QWEN_ENC_KEY")
-    prompt = _build_natural_prompt(quote, ind, flow, news, kline, order_news,
+    prompt = _build_natural_prompt(quote, ind, flow, kline, order_news,
                                     data_10jqka, financial_data, peer_comparison,
                                     revenue_composition)
 
@@ -1102,7 +1079,7 @@ def parse_ai_markdown(markdown_text: str, stock_code: str = "") -> dict:
     return result
 
 
-def _build_natural_prompt(quote: dict, ind: dict, flow: dict, news: list,
+def _build_natural_prompt(quote: dict, ind: dict, flow: dict,
                            kline: list = None, order_news: list = None,
                            data_10jqka: dict = None, financial_data: dict = None,
                            peer_comparison: dict = None,
@@ -1123,21 +1100,6 @@ def _build_natural_prompt(quote: dict, ind: dict, flow: dict, news: list,
         kline_text = "\n".join(lines_k)
 
     # News summary
-    news_text = "暂无新闻数据"
-    if news:
-        lines_n = []
-        for i, n in enumerate(news[:10]):
-            title = n.get("title", "")
-            source = n.get("source", "资讯")
-            content = n.get("content", "")
-            date = n.get("date", "")
-            date_str = " [{}]".format(date[:10]) if date else ""
-            lines_n.append("{}. [{}{}] {}".format(i + 1, source, date_str, title))
-            if content:
-                lines_n.append("   摘要: {}".format(content[:200].replace("\n", " ")))
-        news_text = "\n".join(lines_n) if lines_n else "暂无新闻数据"
-
-    # Order news
     order_news_text = "暂无订单/合同公告"
     if order_news:
         ol = []
@@ -1287,5 +1249,4 @@ def _build_natural_prompt(quote: dict, ind: dict, flow: dict, news: list,
         industry_compare_text=industry_compare_text, main_net_text=main_net_text,
         financial_data_text=financial_data_text, peer_comparison_text=peer_comparison_text,
         revenue_composition_text=revenue_composition_text,
-        news_text=news_text, order_news_text=order_news_text,
     )
