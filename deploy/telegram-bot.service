@@ -1,0 +1,16 @@
+[Unit]
+Description=Stock Analysis Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/stock-analysis-system
+Environment=TELEGRAM_BOT_TOKEN=8953538413:AAF46-xCSrrvFclaS3mlevlWHemj2iCTr3Q
+ExecStartPre=/bin/bash -c "pkill -9 -f telegram_bot.py 2>/dev/null; sleep 2; true"
+ExecStart=/home/ubuntu/stock-analysis-system/backend/venv/bin/python bot/telegram_bot.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
