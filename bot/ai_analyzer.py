@@ -40,10 +40,10 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
 - 量比(5/20日): {vol_ratio}
 - 20日高点: {resistance}  20日低点: {support}
 
-## 最近新闻（含内容摘要）
+## 最近新闻（系统抓取，可能不全 — 请用你的知识补充你可能知道的该股票近期重要新闻/事件，30-80字每条）
 {news_text}
 
-## 订单/合同公告
+## 订单/合同公告（系统抓取，可能不全 — 请用你的知识补充你可能知道的该股票近期重大订单/合同，包括金额、客户、时间）
 {order_news_text}
 
 ## 资金流向
@@ -969,7 +969,7 @@ def analyze_stock_natural(quote: dict, ind: dict, flow: dict, news: list,
     payload = json.dumps({
         "model": MODEL,
         "messages": [
-            {"role": "system", "content": "你是一位资深A股分析师。请基于提供的真实数据做深度分析，输出Markdown格式报告。分析要专业、客观、有数据支撑。不要编造数据。"},
+            {"role": "system", "content": "你是一位资深A股分析师。请基于提供的真实数据做深度分析，输出Markdown格式报告。分析要专业、客观、有数据支撑。对新闻和订单部分，可以结合你的专业知识做适度补充，使分析更全面。财务数据必须基于提供的数据，不可编造。"},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.7,
