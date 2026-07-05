@@ -60,6 +60,12 @@ logging.basicConfig(
 logger = logging.getLogger("stock_bot")
 
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+if not BOT_TOKEN:
+    # Fallback: read from encrypted file
+    from crypto_utils import decrypt
+    import json as _json
+    with open(os.path.join(os.path.dirname(__file__), "telegram_token.enc")) as f:
+        BOT_TOKEN = decrypt(f.read().strip(), "stock-analysis-2024")
 STOCK_CODE_RE = re.compile(r"\b[0368]\d{5}\b")
 COMPARE_KW_RE = re.compile(r"(对比|比较|vs|pk|哪个好|选哪|推荐)", re.IGNORECASE)
 TOP_N_RE = re.compile(
@@ -615,6 +621,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ============================================================
 
 def main():
+    # ---- Lock-file guard: ensure only one bot instance ----
+    import fcntl as _fcntl, os as _os
+    _lock = open('/tmp/telegram_bot.lock', 'w')
+    try:
+        _fcntl.flock(_lock, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        _lock.write(str(_os.getpid()))
+        _lock.flush()
+    except (IOError, OSError):
+        logger.error('Another bot instance is running (lock held). Exiting.')
+        _os._exit(1)
+
     from telegram.request import HTTPXRequest
     request = HTTPXRequest(
         read_timeout=30.0, write_timeout=30.0, connect_timeout=30.0, pool_timeout=30.0,
@@ -631,6 +648,7 @@ def main():
             BotCommand("analyze",   "📈 分析个股（用法 /analyze 600519）"),
             BotCommand("compare",   "🔀 多股对比（用法 /compare 600519 000858）"),
             BotCommand("sector",    "📊 板块追踪（按概念选 3 只 + 5/10/20 日追踪）"),
+            BotCommand("selector",  "📊 板块选股（/selector <概念名>）"),
             BotCommand("delete",    "🗑️ 删除指定股票报告（用法 /delete 600519）"),
             BotCommand("help",      "❓ 完整使用帮助"),
         ])
@@ -653,6 +671,7 @@ def main():
     app.add_handler(CommandHandler("analyze", cmd_analyze))
     app.add_handler(CommandHandler("compare", cmd_compare))
     app.add_handler(CommandHandler("sector", cmd_sector))
+    app.add_handler(CommandHandler("selector", cmd_sector))
     # Register sector-tracker handlers (callbacks + return the text handler)
     from sector_handler import register_sector_handlers
     register_sector_handlers(app)
@@ -662,7 +681,8 @@ def main():
     logger.info("Bot v2 starting (thin client mode — queues to Claude Code skills)...")
     # Pre-load stock name cache from mootdx
     _load_name_cache()
-    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True)
+    import time as _time; _time.sleep(3)
+    app.run_polling(allowed_updates=Update.ALL_TYPES, drop_pending_updates=True, poll_interval=1.0, timeout=30)
 
 
 if __name__ == "__main__":
