@@ -110,7 +110,18 @@ def _pick_for(strategy: Strategy, db) -> dict:
         if df is None or df.empty:
             out["ok"] = True
             out["message"] = "iwencai 今日返回 0 条"
-            logger.info(f"[{strategy.name}] {out['message']}")
+            # Still create a StrategyPick record so frontend can show runs with 0 hits
+            pick = StrategyPick(
+                strategy_id=strategy.id,
+                status="completed",
+                hit_count=0,
+                created_at=now,
+            )
+            db.add(pick)
+            db.commit()
+            out["batch_id"] = pick.id
+            out["hit_count"] = 0
+            logger.info(f"[{strategy.name}] {out['message']} (batch={pick.id})")
             return out
         # Convert DataFrame rows to dicts
         rows = []

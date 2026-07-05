@@ -99,7 +99,58 @@ def fetch_rich_news(code: str, name: str = "") -> dict:
     except Exception as e:
         logger.debug(f"eastmoney_news_search failed for {code}: {e}")
 
-    # Source 3: akshare 东方财富新闻
+    # Source 3: Google News RSS 全网新闻搜索（放在东方财富之后、akshare 之前，确保不被截断）
+    try:
+        import urllib.request as _ur
+        import urllib.parse as _up
+        from xml.etree import ElementTree as _ET
+        import re as _re
+        _html_strip = _re.compile(r'<[^>]*>')
+        query = _up.quote(f"{name} 股票")
+        url = f"https://news.google.com/rss/search?q={query}&hl=zh-CN&gl=CN&ceid=CN:zh-Hans"
+        req = _ur.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        resp = _ur.urlopen(req, timeout=10)
+        root = _ET.fromstring(resp.read().decode("utf-8"))
+        items = root.findall(".//item")
+        gn_count = 0
+        for item in items[:15]:
+            title_el = item.find("title")
+            source_el = item.find("source")
+            link_el = item.find("link")
+            desc_el = item.find("description")
+            pubdate_el = item.find("pubDate")
+            title = (title_el.text or "").strip() if title_el is not None else ""
+            if not title:
+                continue
+            # Remove trailing " - SourceName" from Google News titles
+            if " - " in title:
+                parts = title.rsplit(" - ", 1)
+                if len(parts) == 2 and len(parts[1]) < 20:
+                    title = parts[0]
+            # Strip HTML tags from description (Google News RSS desc contains HTML)
+            desc_raw = (desc_el.text or "") if desc_el is not None else ""
+            desc_clean = _html_strip.sub("", desc_raw).strip()
+            # Normalize date: "Fri, 26 Jun 2026 07:11:52 GMT" -> "2026-06-26"
+            date_raw = pubdate_el.text if pubdate_el is not None else ""
+            try:
+                from email.utils import parsedate_to_datetime as _parse_rfc2822
+                date_dt = _parse_rfc2822(date_raw)
+                date_str = date_dt.strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                date_str = date_raw
+            all_news.append({
+                "title": title,
+                "content": desc_clean[:300],
+                "source": f"GN-{source_el.text}" if source_el is not None else "GN-Google新闻",
+                "date": date_str,
+                "url": link_el.text if link_el is not None else "",
+            })
+            gn_count += 1
+        if gn_count:
+            logger.info(f"Google News for {code}: {gn_count} results")
+    except Exception as e:
+        logger.debug(f"Google News search failed for {code}: {e}")
+    # Source 4: akshare 东方财富新闻
     try:
         import akshare as ak
         ak_news = ak.stock_news_em(symbol=code)
@@ -114,6 +165,7 @@ def fetch_rich_news(code: str, name: str = "") -> dict:
                 })
     except Exception as e:
         logger.debug(f"akshare stock_news_em failed for {code}: {e}")
+
 
     # Dedup by title
     seen = set()

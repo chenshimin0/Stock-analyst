@@ -42,14 +42,19 @@ def decrypt(encrypted: str, passphrase: str) -> str:
 
 def load_api_key(env_var: str) -> str:
     """从加密文件加载并解密 API Key。
-    加密文件路径: env_var 指向的 .enc 文件（或同目录下的 deepseek.enc）
+    加密文件路径: env_var 指向的 .enc 文件（或同目录下的 .enc 文件）
     passphrase: 从环境变量 SECRET_PASSPHRASE 读取（或使用内置默认值）
     """
     enc_path = os.getenv(env_var)
     if not enc_path:
-        enc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "deepseek.enc")
-        if not os.path.exists(enc_path):
-            raise RuntimeError(f"环境变量 {env_var} 未设置（应指向 .enc 加密文件）")
+        # Try deepseek.enc first, then qwen.enc as fallback
+        for name in ("deepseek.enc", "qwen.enc"):
+            p = os.path.join(os.path.dirname(os.path.abspath(__file__)), name)
+            if os.path.exists(p):
+                enc_path = p
+                break
+    if not enc_path or not os.path.exists(enc_path):
+        raise RuntimeError(f"环境变量 {env_var} 未设置，且未找到 .enc 加密文件")
 
     passphrase = os.getenv(_ENV_KEY)
     if not passphrase:

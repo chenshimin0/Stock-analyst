@@ -1144,8 +1144,12 @@ tr:hover{background:#f5f9ff}
     {% for event in events_data %}
     <div style="padding:10px 0;border-bottom:1px solid #e8eef8;display:flex;gap:10px;align-items:flex-start">
       <span style="flex-shrink:0;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;{% if event.impact == '正面' or event.impact == '利好' %}background:#e8f8ed;color:#1aad43{% elif event.impact == '负面' or event.impact == '利空' %}background:#fff0f0;color:#e03535{% else %}background:#fff8e8;color:#c07a00{% endif %}">{{ event.impact or '中性' }}</span>
-      <div>
+      <div style="flex:1">
         <strong style="font-size:13px">{{ event.title }}</strong>
+        {% if event.source %}
+        {% set is_gn = event.source.startswith('GN-') %}
+        <span style="font-size:10px;margin-left:6px;padding:1px 6px;border-radius:3px;{% if is_gn %}background:#e8f0fe;color:#1967d2;border:1px solid #aecbfa{% else %}background:#f0f0f0;color:#888;border:1px solid #ddd{% endif %}" title="{% if is_gn %}来自 Google 新闻搜索{% else %}{{ event.source }}{% endif %}">{% if is_gn %}{{ event.source[3:] }}{% else %}{{ event.source }}{% endif %}</span>
+        {% endif %}
         {% if event.summary %}<br><span style="font-size:11px;color:#888">{{ event.summary }}</span>{% endif %}
       </div>
     </div>

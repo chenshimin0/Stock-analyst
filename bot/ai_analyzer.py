@@ -13,8 +13,12 @@ from crypto_utils import load_api_key
 
 logger = logging.getLogger("ai_analyzer")
 
+QWEN_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
+MODEL = "qwen-plus"
+
+# DeepSeek — kept as fallback
 DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
-MODEL = "deepseek-chat"
+DEEPSEEK_MODEL = "deepseek-chat"
 
 _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数据，生成一份深度分析报告。
 
@@ -182,7 +186,7 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
     {{
       "name": "热门板块名称（如HBM、低空经济、AI算力、固态电池等）",
       "why_hot": "为什么近期热门（政策驱动/技术突破/供需变化等），80-150字",
-      "stock_connection": "该股票与热门板块的关联分析（产品/客户/产业链位置），50-100字",
+      "stock_connection": "该股票与热门板块的关联证据链。必须列出具体证据：1）涉及的具体产品/技术名称；2）已披露的订单或合作（注明金额/时间/客户名）；3）相关子公司或业务部门名称；4）在产业链中的具体位置。如果新闻中未提到客户名，写'客户名称未披露'而非猜测。100-200字",
       "impact_level": "高/中/低",
       "reference_links": [
         {{"title": "参考文章标题", "url": "https://...", "source": "来源"}},
@@ -226,7 +230,7 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
 - 分析要专业、客观，有数据支撑
 - 最终标签（可做/观察/回避）由后端根据双轨评分算法计算，你不需要给出
 - **严禁编造公司间关联关系**：只有在提供的新闻数据中出现的合作关系、关联方、收购等才能引用。禁止凭空猜测或混淆其他公司的业务。关联方名称与股票代码必须严格对应，禁止张冠李戴（如把A公司的6位代码套到B公司头上）。
-- **热门板块识别非常重要**：请务必判断该股票是否涉及当前市场热门板块（如HBM、低空经济、AI算力、固态电池、机器人、合成生物等），如果是，请在hot_sectors中详细展开，说明为什么热门、该股与热门板块的关联，并给出2-3条参考链接
+- **热门板块识别非常重要**：请务必判断该股票是否涉及当前市场热门板块（如HBM、低空经济、AI算力、固态电池、机器人、合成生物等），如果是，请在hot_sectors中详细展开。stock_connection 必须列出具体证据链（产品名、订单金额/时间、客户名、子公司名），不能只写"公司涉及XX概念"这类空泛描述。新闻中提到的订单公告、合同签约、子公司业务进展，都是必引用的核心证据。
 - reference_links中的url必须是真实存在的公开链接（如东方财富、同花顺、雪球、新浪财经、证券时报等平台的资讯文章），如果不确定链接，url填"#"并注明"请搜索：关键词"
 - **scoring_factors.risk 评分规则**：风险维度的"pos"因素代表降低风险的因素（加分项），"neg"因素代表增加风险的因素（减分项）。技术面过热（高RSI/大涨/高PE）本身是减分项，但以下**定性因素应作为正面风险抵消项（pos）**：
   - 龙头地位（行业市占率第一/前三、技术领先）
@@ -484,7 +488,7 @@ def _parse_json_robust(text: str) -> dict:
 
 def analyze_stock(quote: dict, ind: dict, flow: dict, news: list, kline: list = None, order_news: list = None, data_10jqka: dict = None, financial_data: dict = None, peer_comparison: dict = None, revenue_composition: dict = None) -> dict:
 	"""调用 DeepSeek API 进行深度分析，返回完整的分析数据 dict"""
-	api_key = load_api_key("DEEPSEEK_ENC_KEY")
+	api_key = load_api_key("QWEN_ENC_KEY")
 	prompt = _build_analysis_prompt(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
 
 	payload = json.dumps({
@@ -498,7 +502,7 @@ def analyze_stock(quote: dict, ind: dict, flow: dict, news: list, kline: list = 
 	}, ensure_ascii=False).encode("utf-8")
 
 	req = urllib.request.Request(
-		DEEPSEEK_URL,
+		QWEN_URL,
 		data=payload,
 		headers={
 			"Content-Type": "application/json",
@@ -657,7 +661,7 @@ _SECTOR_INDUSTRY_CHAIN_PROMPT = """你是一位资深A股产业研究员。请�
 
 def analyze_sector_industry_chain(query: str, top_n: int = 5) -> dict:
     """板块产业链深度分析：上下游图谱 + 低PE/低股价/分红/龙头筛选"""
-    api_key = load_api_key("DEEPSEEK_ENC_KEY")
+    api_key = load_api_key("QWEN_ENC_KEY")
     prompt = _SECTOR_INDUSTRY_CHAIN_PROMPT.format(query=query, top_n=top_n)
 
     payload = json.dumps({
@@ -671,7 +675,7 @@ def analyze_sector_industry_chain(query: str, top_n: int = 5) -> dict:
     }, ensure_ascii=False).encode("utf-8")
 
     req = urllib.request.Request(
-        DEEPSEEK_URL,
+        QWEN_URL,
         data=payload,
         headers={
             "Content-Type": "application/json",
@@ -713,7 +717,7 @@ def analyze_sector_industry_chain(query: str, top_n: int = 5) -> dict:
 
 def recommend_stocks_by_sector(query: str, top_n: int = 3) -> dict:
 	"""根据用户主题/板块查询，推荐相关A股股票"""
-	api_key = load_api_key("DEEPSEEK_ENC_KEY")
+	api_key = load_api_key("QWEN_ENC_KEY")
 	prompt = _SECTOR_REC_PROMPT.format(query=query, top_n=top_n)
 
 	payload = json.dumps({
@@ -727,7 +731,7 @@ def recommend_stocks_by_sector(query: str, top_n: int = 3) -> dict:
 	}, ensure_ascii=False).encode("utf-8")
 
 	req = urllib.request.Request(
-		DEEPSEEK_URL,
+		QWEN_URL,
 		data=payload,
 		headers={
 			"Content-Type": "application/json",
@@ -805,6 +809,37 @@ def call_deepseek_raw(prompt: str, system: str = "You are a Chinese A-share stoc
 		raise RuntimeError(f"DeepSeek API call failed: {e}") from e
 
 
+def call_qwen_raw(prompt: str, system: str = "You are a Chinese A-share stock analyst. Output ONLY valid JSON, no explanations, no markdown fences, no self-correction.") -> str:
+	"""Call Qwen API for sector stock selection."""
+	api_key = load_api_key("QWEN_ENC_KEY")
+	payload = json.dumps({
+		"model": QWEN_MODEL,
+		"messages": [
+			{"role": "system", "content": system},
+			{"role": "user", "content": prompt},
+		],
+		"temperature": 0.6,
+		"max_tokens": 4096,
+	}, ensure_ascii=False).encode("utf-8")
+	req = urllib.request.Request(
+		QWEN_URL,
+		data=payload,
+		headers={
+			"Content-Type": "application/json",
+			"Authorization": f"Bearer {api_key}",
+		},
+	)
+	try:
+		resp = urllib.request.urlopen(req, timeout=90)
+		result = json.loads(resp.read())
+		content = result["choices"][0]["message"]["content"]
+		logger.info(f"Qwen raw call completed ({len(content)} chars)")
+		return content
+	except Exception as e:
+		logger.error(f"Qwen API 调用失败: {e}")
+		raise RuntimeError(f"Qwen API call failed: {e}") from e
+
+
 # ============================================================
 # V2: Natural Language Analysis (Markdown output, section parsing)
 # ============================================================
@@ -874,7 +909,7 @@ _NATURAL_PROMPT = """你是一位资深A股分析师。请基于以下真实数�
 基于上面真实财务数据，分析营收/利润趋势、盈利能力、资产负债状况
 
 ## 业务结构与投资逻辑
-各业务板块分析、核心竞争力、投资逻辑（含催化剂）
+各业务板块分析、核心竞争力、投资逻辑（含催化剂）。**重要：如果股票涉及市场热门概念（如液冷、AI算力、机器人等），必须列出具体证据链说明为什么该股票属于这个概念——包括：子公司名称、具体产品/技术、已披露订单或合作（含客户名/金额/时间），不能只写"公司涉及XX概念"的泛泛结论。**
 
 ## 订单与战略布局
 在手订单、客户结构、研发投入、产能扩张、新业务方向
@@ -901,6 +936,7 @@ _NATURAL_PROMPT = """你是一位资深A股分析师。请基于以下真实数�
 - 分析要专业客观，有理有据
 - 每个章节写2-3段，不要过于简略
 - 不要编造数据，不确定的写"数据暂缺"
+- **概念归属必须有证据链**：当判断某股票属于某个热门概念（如液冷、AI算力、机器人等）时，必须列出新闻/公告中能找到的具体证据（产品名、订单/合同、合作客户名、子公司业务等）。不能只给结论不列证据。如果新闻中没提到客户名，写"客户名称未披露"，不要猜测。
 """
 
 # Mapping from Markdown ## headers to ai_analysis dict keys
@@ -925,7 +961,7 @@ def analyze_stock_natural(quote: dict, ind: dict, flow: dict, news: list,
 
     Returns parsed dict compatible with existing ai_analysis structure.
     """
-    api_key = load_api_key("DEEPSEEK_ENC_KEY")
+    api_key = load_api_key("QWEN_ENC_KEY")
     prompt = _build_natural_prompt(quote, ind, flow, news, kline, order_news,
                                     data_10jqka, financial_data, peer_comparison,
                                     revenue_composition)
@@ -941,7 +977,7 @@ def analyze_stock_natural(quote: dict, ind: dict, flow: dict, news: list,
     }, ensure_ascii=False).encode("utf-8")
 
     req = urllib.request.Request(
-        DEEPSEEK_URL,
+        QWEN_URL,
         data=payload,
         headers={
             "Content-Type": "application/json",

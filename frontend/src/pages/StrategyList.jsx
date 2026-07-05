@@ -41,7 +41,8 @@ export default function StrategyList() {
         const strats = results.pop();
         const allResults = results;
         // Merge results from multiple statuses
-        const items = allResults.flatMap(r => r.items);
+        const items = allResults.flatMap(r => r.items)
+          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
         const total = allResults.reduce((sum, r) => sum + r.total, 0);
         setPicks(items);
         setTotalItems(total);
@@ -279,7 +280,15 @@ function PickCard({ pick, stockFilter, strategyName, onDeleted }) {
           {new Date(pick.created_at).toLocaleString()}
         </span>
         <span style={{ fontSize: 12, color: '#9ca3af' }}>
-          命中 <b style={{ color: '#60a5fa' }}>{pick.hit_count}</b> 只
+          命中{' '}
+          {pick.hit_count === 0 ? (
+            <b style={{
+              color: '#f59e0b', background: 'rgba(245,158,11,0.15)',
+              padding: '1px 8px', borderRadius: 4, fontSize: 12,
+            }}>0 只 — 无符合条件的股票</b>
+          ) : (
+            <b style={{ color: '#60a5fa' }}>{pick.hit_count} 只</b>
+          )}
         </span>
         <div style={{ flex: 1 }} />
         <AvgCells pick={pick} />
@@ -359,7 +368,9 @@ function PickCard({ pick, stockFilter, strategyName, onDeleted }) {
           </tbody>
         </table>
       ) : (
-        <div style={{ color: '#6b7280', fontSize: 12, padding: '6px 0' }}>该批次没有股票记录</div>
+        <div style={{ color: '#f59e0b', fontSize: 13, padding: '10px 0', background: 'rgba(245,158,11,0.08)', borderRadius: 6, textAlign: 'center' }}>
+          ⚠️ 该批次未命中任何股票 — iwencai 查询无结果，可能条件过于严格或当日无符合条件的标的
+        </div>
       )}
 
       {hidden > 0 && (

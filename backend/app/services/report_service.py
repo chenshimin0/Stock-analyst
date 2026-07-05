@@ -129,6 +129,10 @@ class ReportService:
                 existing.revenue_composition_raw = data.revenue_composition_raw
             if data.fund_flow_recent is not None:
                 existing.fund_flow_recent = data.fund_flow_recent
+            if data.last_limit_up_date is not None:
+                existing.last_limit_up_date = data.last_limit_up_date
+            if data.last_limit_up_days_ago is not None:
+                existing.last_limit_up_days_ago = data.last_limit_up_days_ago
             db.commit()
             db.refresh(existing)
             return existing
@@ -159,6 +163,8 @@ class ReportService:
             peer_comparison_raw=data.peer_comparison_raw,
             revenue_composition_raw=data.revenue_composition_raw,
             fund_flow_recent=data.fund_flow_recent,
+            last_limit_up_date=data.last_limit_up_date,
+            last_limit_up_days_ago=data.last_limit_up_days_ago,
         )
         db.add(report)
         db.commit()

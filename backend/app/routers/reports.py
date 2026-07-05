@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -128,7 +128,7 @@ async def get_report(
     # Try numeric ID first, then slug lookup, then stock_code fallback
     data = None
     report = None
-    if report_id.isdigit():
+    if report_id.isdigit() and len(report_id) <= 4:
         report = db.query(Report).filter(Report.id == int(report_id)).first()
         if report:
             # Lazy-refresh fund flow + limit-up data on every view
@@ -145,7 +145,7 @@ async def get_report(
             ReportService.refresh_fund_flow_if_stale(db, report)
             data = await ReportService.get_report_with_realtime(db, report.id)
     if not data:
-        return {"detail": "Report not found"}, 404
+        raise HTTPException(status_code=404, detail="Report not found")
 
     if format == "html":
         template = _tpl_env.get_template("report.html")
@@ -165,7 +165,29 @@ def create_report(data: ReportCreate, db: Session = Depends(get_db)):
 def delete_report(report_id: str, db: Session = Depends(get_db)):
     """Delete by numeric id, slug (e.g. 'HHKJ'), or stock code (e.g. '600378')."""
     q = db.query(Report)
-    if report_id.isdigit():
+    if report_id.isdigit() and len(report_id) <= 4:
+        # Short numeric: treat as DB primary key
+        report = q.filter(Report.id == int(report_id)).first()
+    else:
+        # Stock code (6-digit) or slug: match by stock_code or slug
+        report = (
+            q.filter((Report.slug == report_id) | (Report.stock_code == report_id))
+            .order_by(Report.created_at.desc())
+            .first()
+        )
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    rid = report.id
+    db.delete(report)
+    db.commit()
+    return {"detail": "deleted", "id": rid}
+
+
+@router.put("/{report_id}", response_model=ReportDetail)
+def update_report(report_id: str, data: ReportUpdate, db: Session = Depends(get_db)):
+    """Update by numeric id, slug, or stock code."""
+    q = db.query(Report)
+    if report_id.isdigit() and len(report_id) <= 4:
         report = q.filter(Report.id == int(report_id)).first()
     else:
         report = (
@@ -174,24 +196,36 @@ def delete_report(report_id: str, db: Session = Depends(get_db)):
             .first()
         )
     if not report:
-        return {"detail": "Report not found"}, 404
-    rid = report.id
-    db.delete(report)
-    db.commit()
-    return {"detail": "deleted", "id": rid}
-
-
-@router.put("/{report_id}", response_model=ReportDetail)
-def update_report(report_id: int, data: ReportUpdate, db: Session = Depends(get_db)):
-    report = db.query(Report).filter(Report.id == report_id).first()
-    if not report:
-        return {"detail": "Report not found"}, 404
+        raise HTTPException(status_code=404, detail="Report not found")
     update_data = data.model_dump(exclude_unset=True)
     for key, val in update_data.items():
         setattr(report, key, val)
     db.commit()
     db.refresh(report)
     return report
+
+
+@router.post("/{report_id}/rerun")
+def rerun_report(report_id: str, db: Session = Depends(get_db)):
+    """Queue a stock for re-analysis. Returns immediately."""
+    import os as _os, json as _json
+    q = db.query(Report)
+    if report_id.isdigit() and len(report_id) <= 4:
+        report = q.filter(Report.id == int(report_id)).first()
+    else:
+        report = (
+            q.filter((Report.slug == report_id) | (Report.stock_code == report_id))
+            .order_by(Report.created_at.desc())
+            .first()
+        )
+    if not report:
+        raise HTTPException(status_code=404, detail="Report not found")
+    queue_dir = _os.getenv("QUEUE_DIR", "/home/ubuntu/stock-analysis-system/backend/queue")
+    _os.makedirs(queue_dir, exist_ok=True)
+    fpath = _os.path.join(queue_dir, f"{report.stock_code}.json")
+    with open(fpath, "w") as f:
+        _json.dump({"stock_code": report.stock_code, "stock_name": report.stock_name}, f)
+    return {"detail": "queued", "stock_code": report.stock_code}
 
 
 @router.get("/{report_id}/winrate", response_model=WinRateResponse)

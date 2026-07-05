@@ -28,6 +28,8 @@ class ReportCreate(BaseModel):
     peer_comparison_raw: Optional[dict] = None
     revenue_composition_raw: Optional[dict] = None
     fund_flow_recent: Optional[list] = None
+    last_limit_up_date: Optional[str] = None
+    last_limit_up_days_ago: Optional[int] = None
     adjusted_price_at_report: Optional[float] = None
 
 

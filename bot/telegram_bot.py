@@ -101,14 +101,16 @@ def _load_name_cache():
     try:
         from mootdx.quotes import Quotes
         client = Quotes.factory(market="std")
-        df = client.stocks(market=1)
-        if df is not None and not df.empty:
-            for _, row in df.iterrows():
-                name = str(row.get("name", "")).strip()
-                code = str(row.get("code", "")).strip()
-                if name and code and len(code) == 6 and code[0] in "0368":
-                    _NAME_CODE_CACHE[name] = code
-            logger.info(f"Name cache loaded: {len(_NAME_CODE_CACHE)} stocks")
+        # Load from both markets: 0=Shanghai, 1=Shenzhen
+        for market in (0, 1):
+            df = client.stocks(market=market)
+            if df is not None and not df.empty:
+                for _, row in df.iterrows():
+                    name = str(row.get("name", "")).strip()
+                    code = str(row.get("code", "")).strip()
+                    if name and code and len(code) == 6 and code[0] in "0368":
+                        _NAME_CODE_CACHE[name] = code
+        logger.info(f"Name cache loaded: {len(_NAME_CODE_CACHE)} stocks")
     except Exception as e:
         logger.warning(f"Failed to load name cache from mootdx: {e}")
 
@@ -211,10 +213,13 @@ def _resolve_codes(text: str) -> list:
             if name in text:
                 logger.info(f"Name resolved from cache: {name} → {code}")
                 return [code]
-    # Fallback: Tencent suggest API
+    # Fallback: Tencent/Sina suggest API
     try:
-        url = f"http://suggest3.sinajs.cn/suggest/type=11&key={urllib.parse.quote(text)}"
-        req = urllib.request.Request(url, headers={"Referer": "https://finance.sina.com.cn/"})
+        url = f"https://suggest3.sinajs.cn/suggest/type=11,12&key={urllib.parse.quote(text)}"
+        req = urllib.request.Request(url, headers={
+            "Referer": "https://finance.sina.com.cn/",
+            "User-Agent": "Mozilla/5.0",
+        })
         resp = urllib.request.urlopen(req, timeout=5)
         raw = resp.read().decode("gbk", errors="replace")
         m = re.search(r'"([^"]+),11,(\d{6}),', raw)

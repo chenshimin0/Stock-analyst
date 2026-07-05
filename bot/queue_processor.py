@@ -103,23 +103,34 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
         except Exception as e:
             logger.warning("Revenue composition re-fetch failed for %s: %s", code, e)
 
-    # === New: 最近涨停日 (pywencai events, more reliable than K-line) ===
+    # === 最近涨停日（从已获取的 pywencai events / K线数据中提取）===
     last_limit_up_date = None
     last_limit_up_days_ago = None
     try:
-        from astock_data import get_last_limit_up_from_pywencai, get_last_limit_up_date
         from datetime import date as _date
-        # Try pywencai first (explicit event tracking)
-        last_limit_up_date = get_last_limit_up_from_pywencai(code)
+        # 1) Try pywencai events already fetched in build_analysis_data
+        pe = (data_10jqka or {}).get("pywencai_events") or []
+        for ev in pe:
+            ename = str(ev.get("event_name", ""))
+            if "涨停" in ename:
+                date_str = str(ev.get("event_date", ""))
+                if len(date_str) == 8 and date_str.isdigit():
+                    last_limit_up_date = f"{date_str[:4]}-{date_str[4:6]}-{date_str[6:8]}"
+                elif "-" in date_str:
+                    last_limit_up_date = date_str[:10]
+                if last_limit_up_date:
+                    break
+        # 2) Fallback: K-line based detection
         if not last_limit_up_date:
-            # Fallback: K-line based detection
+            from astock_data import get_last_limit_up_date
             last_limit_up_date = get_last_limit_up_date(code, lookback_days=180)
+        # 3) Compute days ago
         if last_limit_up_date:
             try:
                 lud = _date.fromisoformat(last_limit_up_date)
                 last_limit_up_days_ago = (_date.today() - lud).days
             except Exception:
-                last_limit_up_days_ago = None
+                pass
     except Exception as e:
         logger.warning("Limit-up fetch failed for %s: %s", code, e)
     # Fund flow recent: pywencai 历史主力资金流向 (30+ days, 主力资金)
@@ -235,7 +246,7 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                     "url": n.get("url", ""),
                 })
         if news:
-            for n in news[:10]:
+            for n in news[:20]:
                 title = n.get("title", "")
                 if not title or title in seen_titles:
                     continue
