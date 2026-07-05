@@ -66,6 +66,7 @@ class ReportSummary(BaseModel):
     risk_score: float
     total_score: float
     label: str
+    ai_model: Optional[str] = None
     created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
@@ -90,6 +91,7 @@ class ReportDetail(BaseModel):
     recommendation: Optional[dict] = None
     scoring_factors: Optional[dict] = None
     ai_analysis: Optional[dict] = None
+    ai_model: Optional[str] = None
     concept_boards: Optional[list] = None
     filtered_concept_boards: Optional[list] = None
     sector_data: Optional[dict] = None

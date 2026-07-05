@@ -25,6 +25,7 @@ class Report(Base):
     recommendation = Column(JSON, nullable=True)
     scoring_factors = Column(JSON, nullable=True)
     ai_analysis = Column(JSON, nullable=True)
+    ai_model = Column(String(30), nullable=True)  # e.g. "qwen-plus" or "deepseek-chat"
     concept_boards = Column(JSON, nullable=True)
     filtered_concept_boards = Column(JSON, nullable=True)
     sector_data = Column(JSON, nullable=True)

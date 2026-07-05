@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, Query, HTTPException
 from fastapi.responses import HTMLResponse
 from sqlalchemy.orm import Session
 from typing import Optional
+from datetime import datetime
 
 from app.database import get_db
 from app.schemas import ReportCreate, ReportSummary, ReportDetail, ReportUpdate, WinRateResponse, WinRatePeriod, AggregateWinRate, PaginatedReports
@@ -220,6 +221,9 @@ def rerun_report(report_id: str, db: Session = Depends(get_db)):
         )
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
+    # Update created_at to now so frontend shows fresh timestamp immediately
+    report.created_at = datetime.utcnow()
+    db.commit()
     queue_dir = _os.getenv("QUEUE_DIR", "/home/ubuntu/stock-analysis-system/backend/queue")
     _os.makedirs(queue_dir, exist_ok=True)
     fpath = _os.path.join(queue_dir, f"{report.stock_code}.json")

@@ -1291,7 +1291,8 @@ tr:hover{background:#f5f9ff}
 <!-- Footer -->
 <div class="footer">
   <p style="margin-bottom:6px"><strong style="color:#c07a00">免责声明：</strong>本报告仅供参考，<strong style="color:#e03535">不构成投资建议</strong>。股市有风险，投资需谨慎。</p>
-  <p>报告日期: {{ report_date }} | 分析标的: {{ stock_name }}({{ stock_code }}) | 数据来源: 东方财富数据中心 + 同花顺F10 + 腾讯财经 + AI分析</p>
+  <p>报告日期: {{ report_date }} | 分析标的: {{ stock_name }}({{ stock_code }}) | AI模型: {{ ai_model or 'qwen-plus' }} | 数据来源: 东方财富数据中心 + 同花顺F10 + 腾讯财经</p>
+  {% if created_at %}<p style="font-size:12px;color:#888">最后生成: {{ created_at.strftime('%Y-%m-%d %H:%M') if created_at is not none else '' }}</p>{% endif %}
 </div>
 
 </body>
