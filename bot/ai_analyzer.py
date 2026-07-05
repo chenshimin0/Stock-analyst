@@ -780,7 +780,7 @@ def call_deepseek_raw(prompt: str, system: str = "You are a Chinese A-share stoc
 	api_key = load_api_key("DEEPSEEK_ENC_KEY")
 
 	payload = json.dumps({
-		"model": MODEL,
+		"model": DEEPSEEK_MODEL,
 		"messages": [
 			{"role": "system", "content": system},
 			{"role": "user", "content": prompt},
