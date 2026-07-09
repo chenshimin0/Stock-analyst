@@ -323,7 +323,7 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
 
             # Override company_profile with real F10 data
             try:
-                import urllib.request, gzip
+                import gzip
                 market = "SH" if code.startswith(("6", "9")) else "SZ"
                 f10_url = f"https://emweb.securities.eastmoney.com/PC_HSF10/CompanySurvey/CompanySurveyAjax?code={market}{code}"
                 req = urllib.request.Request(f10_url, headers={"Referer": "https://emweb.securities.eastmoney.com/"})
@@ -514,14 +514,14 @@ def process_one(code: str, name: str = "") -> bool:
         if _AI_AVAILABLE:
             # Phase A: structured JSON analysis (primary — all data sections)
             try:
-                ai_data = analyze_stock(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
+                ai_data = analyze_stock(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition, concept_boards)
                 logger.info("AI structured analysis done for %s %s", code, name)
             except Exception as e:
                 logger.warning("AI structured analysis failed for %s: %s", code, e)
 
             # Phase B: natural Markdown analysis (supplement — narrative sections)
             try:
-                ai_md = analyze_stock_natural(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
+                ai_md = analyze_stock_natural(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition, concept_boards)
                 if ai_data and ai_md:
                     # Merge: keep all structured JSON fields, add narrative Markdown sections
                     ai_data["_format"] = "merged"
@@ -606,6 +606,30 @@ def process_one(code: str, name: str = "") -> bool:
         return True
     except Exception as e:
         logger.error(f"Process failed for {code}: {e}", exc_info=True)
+        # Even on failure, update the report so it doesn't stay "分析中..." forever
+        try:
+            safe_name = data.get("name", name) if data else (name or code)
+            safe_price = quote.get("price", 0) if quote else 0
+            failed_payload = {
+                "stock_code": code,
+                "stock_name": safe_name,
+                "report_date": str(datetime.now().date()),
+                "price_at_report": safe_price,
+                "momentum_score": 0,
+                "revenue_score": 0,
+                "risk_score": 0,
+                "total_score": 0,
+                "label": f"分析失败: {str(e)[:50]}",
+            }
+            payload_bytes = json.dumps(failed_payload, ensure_ascii=False).encode("utf-8")
+            req = urllib.request.Request(
+                f"{WEB_API_URL}/reports", data=payload_bytes,
+                headers={"Content-Type": "application/json"},
+            )
+            urllib.request.urlopen(req, timeout=10)
+            logger.info(f"Failure notice saved for {code} {safe_name}")
+        except Exception as save_err:
+            logger.warning(f"Could not save failure notice for {code}: {save_err}")
         return False
 
 

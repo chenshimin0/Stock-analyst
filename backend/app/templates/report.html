@@ -732,6 +732,179 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
+<!-- 五、投资逻辑 -->
+{% set logic = ai.investment_logic or [] %}
+{% if logic %}
+<div class="section">
+  <div class="section-title">五、投资逻辑</div>
+  {% for l in logic %}
+  <div class="logic-card">
+    <div class="logic-title">{{ l.title }}</div>
+    <div class="logic-detail">{{ l.detail }}</div>
+    {% if l.catalyst %}
+    <div class="logic-catalyst">催化因素：{{ l.catalyst }}</div>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<!-- 六、产业前景与竞争格局 -->
+{% set comp = ai.competitive_landscape or {} %}
+{% if comp.market_size or comp.market_position or ai.industry_analysis %}
+<div class="section">
+  <div class="section-title">六、产业前景与竞争格局</div>
+  {% if ai.industry_analysis %}
+  <div class="insight-box green" style="margin-bottom:10px">{{ ai.industry_analysis }}</div>
+  {% endif %}
+  {% if comp.market_size %}
+  <div class="comp-card">
+    {% if comp.market_size %}
+    <div class="comp-item">
+      <div class="comp-label">市场规模</div>
+      <div class="comp-content">{{ comp.market_size }}</div>
+    </div>
+    {% endif %}
+    {% if comp.market_position %}
+    <div class="comp-item">
+      <div class="comp-label">行业地位</div>
+      <div class="comp-content">{{ comp.market_position }}</div>
+    </div>
+    {% endif %}
+    {% if comp.main_competitors %}
+    <div class="comp-item">
+      <div class="comp-label">竞争格局</div>
+      <div class="comp-content">{{ comp.main_competitors }}</div>
+    </div>
+    {% endif %}
+    {% if comp.entry_barriers %}
+    <div class="comp-item">
+      <div class="comp-label">进入壁垒</div>
+      <div class="comp-content">{{ comp.entry_barriers }}</div>
+    </div>
+    {% endif %}
+    {% if comp.moat_analysis %}
+    <div class="comp-item" style="grid-column:1/-1">
+      <div class="comp-label">护城河分析</div>
+      <div class="comp-content">{{ comp.moat_analysis }}</div>
+    </div>
+    {% endif %}
+    {% if comp.market_share_trend %}
+    <div class="comp-item" style="grid-column:1/-1">
+      <div class="comp-label">市占率趋势</div>
+      <div class="comp-content">{{ comp.market_share_trend }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% elif comp is string and comp %}
+<div class="section">
+  <div class="section-title">六、产业前景与竞争格局</div>
+  <div class="insight-box blue" style="margin-bottom:10px">{{ comp | markdown_html }}</div>
+</div>
+{% endif %}
+
+<!-- 七、对外投资与战略布局 -->
+{% set strategy = ai.strategic_layout or {} %}
+{% if strategy.rd_investment or strategy.strategy_summary %}
+<div class="section">
+  <div class="section-title">七、对外投资与战略布局</div>
+  <div class="strategy-grid">
+    {% if strategy.rd_investment %}
+    <div class="strategy-item">
+      <div class="st-icon">研发</div>
+      <div class="st-title">技术研发</div>
+      <div class="st-content">{{ strategy.rd_investment }}</div>
+    </div>
+    {% endif %}
+    {% if strategy.capacity_expansion %}
+    <div class="strategy-item">
+      <div class="st-icon">产能</div>
+      <div class="st-title">产能扩张</div>
+      <div class="st-content">{{ strategy.capacity_expansion }}</div>
+    </div>
+    {% endif %}
+    {% if strategy.global_expansion %}
+    <div class="strategy-item">
+      <div class="st-icon">全球化</div>
+      <div class="st-title">全球化布局</div>
+      <div class="st-content">{{ strategy.global_expansion }}</div>
+    </div>
+    {% endif %}
+    {% if strategy.new_business %}
+    <div class="strategy-item">
+      <div class="st-icon">新业务</div>
+      <div class="st-title">新业务布局</div>
+      <div class="st-content">{{ strategy.new_business }}</div>
+    </div>
+    {% endif %}
+  </div>
+  {% if strategy.strategy_summary %}
+  <div class="strategy-summary">{{ strategy.strategy_summary }}</div>
+  {% endif %}
+</div>
+{% endif %}
+
+{% set ord_strat = ai.md_order_and_strategy or ai.order_and_strategy or "" %}
+
+<!-- 八、订单/合同情况 -->
+{% set order_analysis = ai.order_analysis or {} %}
+{% if order_analysis or ord_strat %}
+<div class="section">
+  <div class="section-title">八、订单/合同情况</div>
+  <div class="card">
+    {% if order_analysis.total_backlog %}
+    <div style="padding:10px 0;border-bottom:1px solid #e8eef8">
+      <strong style="color:#1967d2">在手订单总额</strong>
+      <span style="margin-left:12px;font-weight:700;font-size:15px">{{ order_analysis.total_backlog }}</span>
+    </div>
+    {% endif %}
+    {% set major_orders = order_analysis.major_orders or [] %}
+    {% if major_orders %}
+    <div style="padding:10px 0;border-bottom:1px solid #e8eef8">
+      <strong style="color:#1967d2">重大订单列表</strong>
+      <table style="width:100%;margin-top:8px;border-collapse:collapse;font-size:13px">
+        <thead>
+          <tr style="background:#f0f4ff">
+            <th style="padding:6px 10px;text-align:left;border:1px solid #dde">客户</th>
+            <th style="padding:6px 10px;text-align:left;border:1px solid #dde">订单详情</th>
+            <th style="padding:6px 10px;text-align:left;border:1px solid #dde;width:100px">金额</th>
+            <th style="padding:6px 10px;text-align:left;border:1px solid #dde;width:80px">状态</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for o in major_orders %}
+          <tr>
+            <td style="padding:6px 10px;border:1px solid #dde;font-weight:600">{{ o.customer }}</td>
+            <td style="padding:6px 10px;border:1px solid #dde">{{ o.order_detail }}</td>
+            <td style="padding:6px 10px;border:1px solid #dde;color:#d32f2f;font-weight:600">{{ o.amount }}</td>
+            <td style="padding:6px 10px;border:1px solid #dde">{{ o.status }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+    {% if order_analysis.customer_structure %}
+    <div style="padding:10px 0;border-bottom:1px solid #e8eef8">
+      <strong style="color:#1967d2">客户结构分析</strong>
+      <p style="margin:6px 0 0 0;font-size:13px;color:#555">{{ order_analysis.customer_structure }}</p>
+    </div>
+    {% endif %}
+    {% if order_analysis.order_visibility %}
+    <div style="padding:10px 0;border-bottom:1px solid #e8eef8">
+      <strong style="color:#1967d2">订单可见度</strong>
+      <p style="margin:6px 0 0 0;font-size:13px;color:#555">{{ order_analysis.order_visibility }}</p>
+    </div>
+    {% endif %}
+    {% if ord_strat is string and ord_strat %}
+    <div style="padding:10px 0"><div class="insight-box blue" style="margin:0">{{ ord_strat | markdown_html }}</div></div>
+    {% endif %}
+  </div>
+</div>
+{% endif %}
+
 <!-- 4.5 资金面与涨停记录 -->
 {% set ffr = fund_flow_recent or [] %}
 {% set ffr_3d = ffr[:3] %}
@@ -866,131 +1039,10 @@ tr:hover{background:#f5f9ff}
     </div>
   </div>
 </div>
-
-
-<!-- 五、投资逻辑 -->
-{% set logic = ai.investment_logic or [] %}
-{% if logic %}
-<div class="section">
-  <div class="section-title">五、投资逻辑</div>
-  {% for l in logic %}
-  <div class="logic-card">
-    <div class="logic-title">{{ l.title }}</div>
-    <div class="logic-detail">{{ l.detail }}</div>
-    {% if l.catalyst %}
-    <div class="logic-catalyst">催化因素：{{ l.catalyst }}</div>
-    {% endif %}
-  </div>
-  {% endfor %}
-</div>
-{% endif %}
-
-<!-- 六、产业前景与竞争格局 -->
-{% set comp = ai.competitive_landscape or {} %}
-{% if comp.market_size or comp.market_position or ai.industry_analysis %}
-<div class="section">
-  <div class="section-title">六、产业前景与竞争格局</div>
-  {% if ai.industry_analysis %}
-  <div class="insight-box green" style="margin-bottom:10px">{{ ai.industry_analysis }}</div>
-  {% endif %}
-  {% if comp.market_size %}
-  <div class="comp-card">
-    {% if comp.market_size %}
-    <div class="comp-item">
-      <div class="comp-label">市场规模</div>
-      <div class="comp-content">{{ comp.market_size }}</div>
-    </div>
-    {% endif %}
-    {% if comp.market_position %}
-    <div class="comp-item">
-      <div class="comp-label">行业地位</div>
-      <div class="comp-content">{{ comp.market_position }}</div>
-    </div>
-    {% endif %}
-    {% if comp.main_competitors %}
-    <div class="comp-item">
-      <div class="comp-label">竞争格局</div>
-      <div class="comp-content">{{ comp.main_competitors }}</div>
-    </div>
-    {% endif %}
-    {% if comp.entry_barriers %}
-    <div class="comp-item">
-      <div class="comp-label">进入壁垒</div>
-      <div class="comp-content">{{ comp.entry_barriers }}</div>
-    </div>
-    {% endif %}
-    {% if comp.moat_analysis %}
-    <div class="comp-item" style="grid-column:1/-1">
-      <div class="comp-label">护城河分析</div>
-      <div class="comp-content">{{ comp.moat_analysis }}</div>
-    </div>
-    {% endif %}
-    {% if comp.market_share_trend %}
-    <div class="comp-item" style="grid-column:1/-1">
-      <div class="comp-label">市占率趋势</div>
-      <div class="comp-content">{{ comp.market_share_trend }}</div>
-    </div>
-    {% endif %}
-  </div>
-  {% endif %}
-</div>
-{% elif comp is string and comp %}
-<div class="section">
-  <div class="section-title">六、产业前景与竞争格局</div>
-  <div class="insight-box blue" style="margin-bottom:10px">{{ comp | markdown_html }}</div>
-</div>
-{% endif %}
-
-<!-- 七、对外投资与战略布局 -->
-{% set strategy = ai.strategic_layout or {} %}
-{% if strategy.rd_investment or strategy.strategy_summary %}
-<div class="section">
-  <div class="section-title">七、对外投资与战略布局</div>
-  <div class="strategy-grid">
-    {% if strategy.rd_investment %}
-    <div class="strategy-item">
-      <div class="st-icon">研发</div>
-      <div class="st-title">技术研发</div>
-      <div class="st-content">{{ strategy.rd_investment }}</div>
-    </div>
-    {% endif %}
-    {% if strategy.capacity_expansion %}
-    <div class="strategy-item">
-      <div class="st-icon">产能</div>
-      <div class="st-title">产能扩张</div>
-      <div class="st-content">{{ strategy.capacity_expansion }}</div>
-    </div>
-    {% endif %}
-    {% if strategy.global_expansion %}
-    <div class="strategy-item">
-      <div class="st-icon">全球化</div>
-      <div class="st-title">全球化布局</div>
-      <div class="st-content">{{ strategy.global_expansion }}</div>
-    </div>
-    {% endif %}
-    {% if strategy.new_business %}
-    <div class="strategy-item">
-      <div class="st-icon">新业务</div>
-      <div class="st-title">新业务布局</div>
-      <div class="st-content">{{ strategy.new_business }}</div>
-    </div>
-    {% endif %}
-  </div>
-  {% if strategy.strategy_summary %}
-  <div class="strategy-summary">{{ strategy.strategy_summary }}</div>
-  {% endif %}
-</div>
-{% endif %}
-	<!-- AI订单与战略深度分析 -->
-	{% set ord_strat = ai.md_order_and_strategy or ai.order_and_strategy or "" %}
-	{% if ord_strat is string and ord_strat %}
-	<div class="card" style="margin-top:12px"><div class="insight-box blue">{{ ord_strat | markdown_html }}</div></div>
-	{% endif %}
-
-<!-- 八、估值展望 -->
+<!-- 九、估值展望 -->
 {% if ai.valuation_analysis %}
 <div class="section">
-  <div class="section-title">八、估值展望</div>
+  <div class="section-title">九、估值展望</div>
   <div class="insight-box blue" style="margin-bottom:12px">{{ ai.valuation_analysis }}</div>
 
   {% set scenarios = ai.valuation_scenarios or [] %}
@@ -1018,9 +1070,9 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
-<!-- 九、技术面分析 -->
+<!-- 十、技术面分析 -->
 <div class="section">
-  <div class="section-title">九、技术面分析</div>
+  <div class="section-title">十、技术面分析</div>
   {% if ai.technical_analysis %}
   <div class="insight-box blue" style="margin-bottom:12px">{{ ai.technical_analysis }}</div>
   {% endif %}
@@ -1041,11 +1093,11 @@ tr:hover{background:#f5f9ff}
   {% endif %}
 </div>
 
-<!-- 七、专家团队研判 -->
+<!-- 十一、专家团队研判 -->
 {% set experts = ai.expert_opinions or expert_data or {} %}
 {% if experts %}
 <div class="section">
-  <div class="section-title">十、专家团队研判</div>
+  <div class="section-title">十一、专家团队研判</div>
   <div class="card">
     {% for name, exp in experts.items() %}
     <div class="expert-card">
@@ -1072,9 +1124,9 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
-<!-- 八、双轨评分 -->
+<!-- 十二、双轨评分体系 -->
 <div class="section">
-  <div class="section-title">十一、双轨评分体系</div>
+  <div class="section-title">十二、双轨评分体系</div>
   <div class="score-section">
     {% set sf = scoring_factors or {} %}
     {% set sf_m = sf.momentum or [] %}
@@ -1135,29 +1187,6 @@ tr:hover{background:#f5f9ff}
     </div>
   </div>
 </div>
-
-<!-- 九、事件/舆情 -->
-{% if events_data %}
-<div class="section">
-  <div class="section-title">十二、事件驱动与舆情</div>
-  <div class="card">
-    {% for event in events_data %}
-    <div style="padding:10px 0;border-bottom:1px solid #e8eef8;display:flex;gap:10px;align-items:flex-start">
-      <span style="flex-shrink:0;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:600;{% if event.impact == '正面' or event.impact == '利好' %}background:#e8f8ed;color:#1aad43{% elif event.impact == '负面' or event.impact == '利空' %}background:#fff0f0;color:#e03535{% else %}background:#fff8e8;color:#c07a00{% endif %}">{{ event.impact or '中性' }}</span>
-      <div style="flex:1">
-        <strong style="font-size:13px">{{ event.title }}</strong>
-        {% if event.source %}
-        {% set is_gn = event.source.startswith('GN-') %}
-        <span style="font-size:10px;margin-left:6px;padding:1px 6px;border-radius:3px;{% if is_gn %}background:#e8f0fe;color:#1967d2;border:1px solid #aecbfa{% else %}background:#f0f0f0;color:#888;border:1px solid #ddd{% endif %}" title="{% if is_gn %}来自 Google 新闻搜索{% else %}{{ event.source }}{% endif %}">{% if is_gn %}{{ event.source[3:] }}{% else %}{{ event.source }}{% endif %}</span>
-        {% endif %}
-        {% if event.summary %}<br><span style="font-size:11px;color:#888">{{ event.summary }}</span>{% endif %}
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-</div>
-{% endif %}
-
 <!-- 十三、操作建议与风险（AI深度分析补充） -->
 {% set rec_risk = ai.md_recommendation_and_risk or ai.recommendation_and_risk or "" %}
 {% if rec_risk is string and rec_risk %}

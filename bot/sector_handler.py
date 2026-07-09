@@ -26,6 +26,29 @@ from ai_analyzer import call_deepseek_raw  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
+# Per-concept lock to prevent concurrent duplicate creation
+# DeepSeek API calls take 5-10s; without this lock, two rapid /sector
+# commands for the same concept both pass the "no existing pick" check
+# and create duplicate SectorPick records.
+_concept_locks: dict[str, threading.Lock] = {}
+_concept_locks_lock = threading.Lock()
+
+
+def _get_concept_lock(concept_name: str) -> threading.Lock:
+    """Get or create a per-concept lock to serialize pick creation."""
+    key = concept_name.strip().lower()
+    with _concept_locks_lock:
+        if key not in _concept_locks:
+            _concept_locks[key] = threading.Lock()
+        return _concept_locks[key]
+
+
+# Prune stale locks periodically (keep dict from growing indefinitely)
+def _prune_concept_locks():
+    with _concept_locks_lock:
+        _concept_locks.clear()
+    logger.debug("Concept locks pruned")
+
 
 # Real DeepSeek call delegated to ai_analyzer. Caller (sector_selector) parses JSON.
 def call_deepseek(prompt: str) -> str:
@@ -57,16 +80,30 @@ async def handle_sector_text(update: Update, context: ContextTypes.DEFAULT_TYPE,
     user_id = update.effective_user.id
     db = SessionLocal()
     try:
+        # Check ALL existing active picks (not just first) — if user previously
+        # triggered duplicates, we should see them all.
         existing = (
             db.query(SectorPick)
             .filter(
                 SectorPick.sector_name == concept_name,
                 SectorPick.status.in_(["in_progress", "completed"]),
             )
-            .first()
+            .all()
         )
         if existing:
-            await _handle_existing(update, context, db, existing, user_id, concept_name)
+            # Use the first existing pick for the reopen flow
+            first = existing[0]
+            # If there are extras (duplicates from prior bug), silently archive them
+            if len(existing) > 1:
+                logger.warning(
+                    f"Found {len(existing)} active picks for '{concept_name}' — "
+                    f"archiving extras (ids: {[e.id for e in existing[1:]]})"
+                )
+                for extra in existing[1:]:
+                    extra.status = "archived"
+                    extra.archived_at = datetime.utcnow()
+                db.commit()
+            await _handle_existing(update, context, db, first, user_id, concept_name)
             return
         await _run_new_pick(update, context, db, concept_name)
     finally:
@@ -122,79 +159,107 @@ async def _run_new_pick(update, context, db, concept_name):
 
 
 async def _run_new_pick_in_chat(bot, chat_id: int, concept_name: str):
-    db = SessionLocal()
+    # ---- Per-concept lock: prevent concurrent duplicate creation ----
+    lock = _get_concept_lock(concept_name)
+    acquired = lock.acquire(timeout=120)  # 2 min max wait
+    if not acquired:
+        await bot.send_message(
+            chat_id=chat_id,
+            text=f"⏳ 板块「{concept_name}」正在处理中，请稍后再试。"
+        )
+        return
     try:
-        result = select_stocks_for_concept(
-            concept_name, db, deepseek_callable=call_deepseek,
-        )
-        if "error" in result:
-            err_lines = [
-                f"❌ 选股失败：{result['error']}",
-                "",
-                f"可能原因：",
-                f"  • 概念过冷门，DeepSeek 知识截止 2024 年初",
-                f"  • DeepSeek 推的股被主板/非 ST/可报价规则拒收",
-                f"  • 同花顺热点 7 天内没匹配该概念",
-                "",
-                f"建议：",
-                f"  • 换更主流的概念（如 算力/CPO/固态电池/机器人）",
-                f"  • 或直接给我具体股票代码",
-            ]
-            await bot.send_message(chat_id=chat_id, text="\n".join(err_lines))
-            return
-        # Archive any old active pick (defensive)
-        old = (
-            db.query(SectorPick)
-            .filter(
-                SectorPick.sector_name == concept_name,
-                SectorPick.status.in_(["in_progress", "completed"]),
+        db = SessionLocal()
+        try:
+            result = select_stocks_for_concept(
+                concept_name, db, deepseek_callable=call_deepseek,
             )
-            .first()
-        )
-        if old:
-            old.status = "archived"
-            old.archived_at = datetime.utcnow()
-        # Create new pick
-        pick = SectorPick(
-            sector_name=concept_name,
-            status="in_progress",
-            selection_source=result["source"],
-        )
-        db.add(pick)
-        db.flush()
-        t0_date = datetime.now().date()
-        for p in result["picks"]:
-            q = get_quote(p["code"])
-            t0_price = q.get("price", 0) if q else 0
-            db.add(SectorPickStock(
-                sector_pick_id=pick.id,
-                stock_code=p["code"],
-                stock_name=p["name"],
-                selection_reason=p["reason"],
-                t0_date=t0_date,
-                t0_price=t0_price or None,
-                t0_avg_price=None,
-            ))
-        db.commit()
-        # Reply
-        lines = [
-            f"已记录 3 只（板块：{concept_name}）：",
-        ]
-        for p in result["picks"]:
-            lines.append(f"- {p['code']} {p['name']} — {p['reason']}")
-        lines.append("")
-        lines.append(f"数据源：{'API 实时' if result['source'] == 'api_driven' else 'AI 知识'}")
-        if result.get("rejected"):
+            if "error" in result:
+                err_lines = [
+                    f"❌ 选股失败：{result['error']}",
+                    "",
+                    f"可能原因：",
+                    f"  • 概念过冷门，DeepSeek 知识截止 2024 年初",
+                    f"  • DeepSeek 推的股被主板/非 ST/可报价规则拒收",
+                    f"  • 同花顺热点 7 天内没匹配该概念",
+                    "",
+                    f"建议：",
+                    f"  • 换更主流的概念（如 算力/CPO/固态电池/机器人）",
+                    f"  • 或直接给我具体股票代码",
+                ]
+                await bot.send_message(chat_id=chat_id, text="\n".join(err_lines))
+                return
+
+            # Archive ALL old active picks (not just first) for this concept.
+            # Using .all() prevents stale duplicates from accumulating when
+            # the per-concept lock can't help (e.g. multiple bot restarts).
+            old_picks = (
+                db.query(SectorPick)
+                .filter(
+                    SectorPick.sector_name == concept_name,
+                    SectorPick.status.in_(["in_progress", "completed"]),
+                )
+                .all()
+            )
+            if len(old_picks) > 0:
+                logger.info(
+                    f"Archiving {len(old_picks)} old active pick(s) for '{concept_name}' "
+                    f"(ids: {[o.id for o in old_picks]})"
+                )
+            for old in old_picks:
+                old.status = "archived"
+                old.archived_at = datetime.utcnow()
+
+            # Create new pick
+            pick = SectorPick(
+                sector_name=concept_name,
+                status="in_progress",
+                selection_source=result["source"],
+            )
+            db.add(pick)
+            db.flush()
+            t0_date = datetime.now().date()
+            picks = result["picks"]
+            if len(picks) > 3:
+                logger.error(
+                    f"BUG: select_stocks_for_concept returned {len(picks)} picks "
+                    f"for '{concept_name}' — expected max 3. Picks: {[p['code'] for p in picks]}. "
+                    f"Truncating to first 3."
+                )
+            for p in picks[:3]:  # Hard limit: max 3 stocks
+                q = get_quote(p["code"])
+                t0_price = q.get("price", 0) if q else 0
+                db.add(SectorPickStock(
+                    sector_pick_id=pick.id,
+                    stock_code=p["code"],
+                    stock_name=p["name"],
+                    selection_reason=p["reason"],
+                    t0_date=t0_date,
+                    t0_price=t0_price or None,
+                    t0_avg_price=None,
+                ))
+            db.commit()
+            # Reply
+            lines = [
+                f"已记录 3 只（板块：{concept_name}）：",
+            ]
+            for p in result["picks"][:3]:  # Hard limit: max 3 stocks
+                lines.append(f"- {p['code']} {p['name']} — {p['reason']}")
             lines.append("")
-            lines.append("⚠️ 以下股票被后置校验拒绝（不合规，未选入）：")
-            for r in result["rejected"][:3]:
-                rs = "; ".join(r.get("reject_reasons", []))
-                lines.append(f"  · {r['code']} {r['name']} — {rs}")
-        lines.append("")
-        lines.append("将在 T+5/10/20 个交易日后自动追踪。")
-        await bot.send_message(chat_id=chat_id, text="\n".join(lines))
+            lines.append(f"数据源：{'API 实时' if result['source'] == 'api_driven' else 'AI 知识'}")
+            if result.get("rejected"):
+                lines.append("")
+                lines.append("⚠️ 以下股票被后置校验拒绝（不合规，未选入）：")
+                for r in result["rejected"][:3]:
+                    rs = "; ".join(r.get("reject_reasons", []))
+                    lines.append(f"  · {r['code']} {r['name']} — {rs}")
+            lines.append("")
+            lines.append("将在 T+5/10/20 个交易日后自动追踪。")
+            await bot.send_message(chat_id=chat_id, text="\n".join(lines))
+        finally:
+            db.close()
     finally:
-        db.close()
+        lock.release()
 
 
 # === Reopen button ===

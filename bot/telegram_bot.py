@@ -623,14 +623,33 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     # ---- Lock-file guard: ensure only one bot instance ----
     import fcntl as _fcntl, os as _os
-    _lock = open('/tmp/telegram_bot.lock', 'w')
+    _lock_path = '/tmp/telegram_bot.lock'
+    _lock = open(_lock_path, 'a+')
     try:
         _fcntl.flock(_lock, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
-        _lock.write(str(_os.getpid()))
-        _lock.flush()
     except (IOError, OSError):
-        logger.error('Another bot instance is running (lock held). Exiting.')
-        _os._exit(1)
+        # Lock held by another process — check if it's stale
+        _lock.seek(0)
+        old_pid_str = _lock.read().strip()
+        if old_pid_str:
+            try:
+                old_pid = int(old_pid_str)
+                _os.kill(old_pid, 0)  # signal 0 = check if process exists
+                logger.error(f'Another bot instance is running (pid={old_pid}). Exiting.')
+                _os._exit(1)
+            except (OSError, ValueError):
+                # Process no longer exists — stale lock, force take over
+                logger.warning(f'Stale lock detected (pid={old_pid_str} dead). Taking over.')
+                _lock.close()
+                _os.remove(_lock_path)
+                _lock = open(_lock_path, 'w')
+                _fcntl.flock(_lock, _fcntl.LOCK_EX | _fcntl.LOCK_NB)
+        else:
+            logger.error('Another bot instance is running (lock held). Exiting.')
+            _os._exit(1)
+    _lock.truncate(0)
+    _lock.write(str(_os.getpid()))
+    _lock.flush()
 
     from telegram.request import HTTPXRequest
     request = HTTPXRequest(

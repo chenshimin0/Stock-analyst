@@ -52,6 +52,9 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
 ## 机构一致预期EPS（来自同花顺）
 {eps_forecast_text}
 
+## 概念板块归属（来自同花顺）
+{concept_boards_text}
+
 ## 同花顺热点归因
 {hot_reason_text}
 
@@ -71,6 +74,8 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
 {revenue_composition_text}
 
 ---
+
+**重要提示**：上述数据区中的「订单/合同公告」和「新闻」仅是近期抓取结果，覆盖面有限。你对A股公司有丰富的训练知识，请积极调用你的知识库中关于 {stock_name}（{stock_code}）的所有公开信息——特别是定期报告、券商研报、投资者交流纪要、公司公告中披露的订单、合同、合作进展——来填充 order_analysis 和 investment_logic 模块。不要因为数据区未列出就跳过，你的知识远比数据抓取全面。
 
 请严格按照以下JSON格式输出（不要输出其他内容）：
 
@@ -144,12 +149,12 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
     "comparative_advantage": "基于同行业可比公司数据，对比分析该股票的龙头/垄断地位优势。从营收规模、毛利率、ROE、净利率、市值等维度，与主要竞争对手进行量化对比，说明该股票为什么优于同行、为什么值得选择（80-150字）。如果从数据上看不如同行，也要如实说明差距"
   }},
   "order_analysis": {{
-    "total_backlog": "在手订单总额（如'超34亿元'）",
+    "total_backlog": "在手订单总额（如'超34亿元'或'约50-60亿'或'暂无公开披露数据'）",
     "major_orders": [
-      {{"customer": "客户名称", "order_detail": "订单详情", "amount": "金额", "status": "状态（交付中/已验收/新签）"}}
+      {{"customer": "客户名称（如苹果、华为、特斯拉等，不确定可写'未披露'）", "order_detail": "订单详情/产品名称（30-60字）", "amount": "金额（如'约5亿元'）", "status": "状态（新签/交付中/已验收）"}}
     ],
-    "customer_structure": "客户结构分析（集中度/国内外占比/优化趋势），50-100字",
-    "order_visibility": "订单可见度分析（能见度可到哪个季度/年度），30-50字"
+    "customer_structure": "客户结构分析（集中度/国内外占比/单一客户依赖风险/优化趋势），80-150字",
+    "order_visibility": "订单可见度分析（能见度可到哪个季度/年度，对比历史水平），50-100字"
   }},
   "strategic_layout": {{
     "rd_investment": "研发投入方向和力度（30-50字）",
@@ -199,7 +204,7 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
     "风险控制官": {{"conclusion": "一句话结论", "key_points": ["要点1", "要点2", "要点3"]}},
     "宏观策略师": {{"conclusion": "一句话结论", "key_points": ["要点1", "要点2"]}},
     "行业研究家": {{"conclusion": "一句话结论", "key_points": ["要点1", "要点2"]}},
-    "消息面猎手": {{"conclusion": "一句话结论（基于真实订单/公告数据）", "key_points": ["要点1：具体订单公告内容", "要点2：消息面影响"]}}
+    "订单合同专家": {{"conclusion": "一句话结论（聚焦在手订单/重大合同/客户结构）", "key_points": ["要点1：订单总额与能见度", "要点2：重大合同详情与影响"]}}
   }},
   "scoring_factors": {{
     "momentum": [["正向因素", "pos"], ["中性因素", "neu"], ["负向因素", "neg"]],
@@ -239,7 +244,7 @@ _ANALYSIS_PROMPT = """你是一位资深A股分析师。请基于以下真实数
 """
 
 
-def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, kline: list = None, order_news: list = None, data_10jqka: dict = None, financial_data: dict = None, peer_comparison: dict = None, revenue_composition: dict = None) -> str:
+def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, news: list = None, kline: list = None, order_news: list = None, data_10jqka: dict = None, financial_data: dict = None, peer_comparison: dict = None, revenue_composition: dict = None, concept_boards: list = None) -> str:
 	"""构建分析 prompt"""
 	name = quote.get("name", "")
 	code = quote.get("code", "")
@@ -255,7 +260,7 @@ def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, kline: list = Non
 		kline_text = "\n".join(lines)
 
 	# 格式化订单/合同新闻
-	order_news_text = "暂无订单/合同相关公告"
+	order_news_text = "请基于你的训练知识，回忆并详细列出 {stock_name}（{stock_code}）近期公开披露的重大订单、合同及合作进展。包括：客户名称、订单内容/产品、金额范围、签订时间、交付状态。如果你确实不知道，请如实填写'训练知识中暂无相关信息'，但不要编造。".format(stock_name=name, stock_code=code)
 	if order_news:
 		order_lines = []
 		for item in order_news[:6]:
@@ -264,7 +269,7 @@ def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, kline: list = Non
 			content = item.get('content', '')
 			order_lines.append(f"- [{source}] {title}: {(content or '')[:150]}")
 		if order_lines:
-			order_news_text = "\n".join(order_lines)
+			order_news_text = "以下是从新闻中抓取到的订单/合同信息（同时请结合你的训练知识进行补充）：\n" + "\n".join(order_lines)
 
 	# 格式化资金流向
 	fund_text = "暂无资金流向数据"
@@ -397,6 +402,15 @@ def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, kline: list = Non
 		if len(rc_lines) > 1:
 			revenue_composition_text = "\n".join(rc_lines)
 
+	# 格式化概念板块
+	concept_boards_text = "未获取到概念板块数据"
+	if concept_boards:
+		cb_names = [cb.get("board_name", "") for cb in concept_boards if cb.get("board_name")]
+		if cb_names:
+			concept_boards_text = "该股票被同花顺归类到以下概念板块：\n"
+			concept_boards_text += "\n".join("- " + n for n in cb_names)
+			concept_boards_text += "\n\n请在 hot_sectors 中分析以上概念板块中属于当前市场热点的板块，说明该股票与这些热点板块的具体关联证据链。对于可能无关的概念也要逐一列出并说明原因。"
+
 	return _ANALYSIS_PROMPT.format(
 		stock_name=name,
 		stock_code=code,
@@ -426,6 +440,7 @@ def _build_analysis_prompt(quote: dict, ind: dict, flow: dict, kline: list = Non
 		financial_data_text=financial_data_text,
 		peer_comparison_text=peer_comparison_text,
 		revenue_composition_text=revenue_composition_text,
+		concept_boards_text=concept_boards_text,
 	)
 
 
@@ -466,15 +481,15 @@ def _parse_json_robust(text: str) -> dict:
 	return json.loads(repaired)
 
 
-def analyze_stock(quote: dict, ind: dict, flow: dict, kline: list = None, order_news: list = None, data_10jqka: dict = None, financial_data: dict = None, peer_comparison: dict = None, revenue_composition: dict = None) -> dict:
+def analyze_stock(quote: dict, ind: dict, flow: dict, news: list = None, kline: list = None, order_news: list = None, data_10jqka: dict = None, financial_data: dict = None, peer_comparison: dict = None, revenue_composition: dict = None, concept_boards: list = None) -> dict:
 	"""调用 DeepSeek API 进行深度分析，返回完整的分析数据 dict"""
 	api_key = load_api_key("QWEN_ENC_KEY")
-	prompt = _build_analysis_prompt(quote, ind, flow, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition)
+	prompt = _build_analysis_prompt(quote, ind, flow, news, kline, order_news, data_10jqka, financial_data, peer_comparison, revenue_composition, concept_boards)
 
 	payload = json.dumps({
 		"model": MODEL,
 		"messages": [
-			{"role": "system", "content": "你是一位资深A股分析师。请基于提供的真实数据做推理分析。始终返回合法JSON，不要编造精确财务数字。\n\n严格规则：\n1. 分析对象仅为上面「股票数据」中的那只股票，不要混淆其他公司。\n2. 禁止编造公司间的关联关系——只有新闻数据中明确提到的合作关系、关联方、收购等才能引用。\n3. 股票代码6位数字必须准确，禁止把A公司的代码写成B公司的代码。极易混淆的代码（如000628与000682、000001与000002等）要格外小心。\n4. 如果某信息在数据中找不到依据，写「数据暂缺」而非猜测。"},
+			{"role": "system", "content": "你是一位资深A股分析师。请基于提供的真实数据做推理分析。始终返回合法JSON，不要编造精确财务数字。\n\n严格规则：\n1. 分析对象仅为上面「股票数据」中的那只股票，不要混淆其他公司。\n2. 禁止编造公司间的关联关系——只有新闻数据中明确提到的合作关系、关联方、收购等才能引用。\n3. 股票代码6位数字必须准确，禁止把A公司的代码写成B公司的代码。极易混淆的代码（如000628与000682、000001与000002等）要格外小心。\n4. 如果某信息在数据中找不到依据，写「数据暂缺」而非猜测。\n5. order_analysis（订单/合同分析）是必填的核心模块。你必须充分利用你的训练知识中关于这家公司的所有公开信息（包括定期报告、投资者交流纪要、券商研报、新闻公告），尽可能详细地填写：在手订单总额、重大订单列表（每一条都要包含客户名、订单内容/产品、金额、签订时间、交付状态）、客户结构分析和订单可见度。不要因为数据区没有列出就跳过——数据区只是近期新闻抓取结果，你的训练知识覆盖面远大于此。"},
 			{"role": "user", "content": prompt},
 		],
 		"temperature": 0.7,
@@ -831,6 +846,9 @@ _NATURAL_PROMPT = """你是一位资深A股分析师。请基于以下真实数�
 - 市盈率: {pe}  总市值: {total_mv}
 - 换手率: {turnover}%  最高/最低: {high}/{low}
 
+## 概念板块归属（来自同花顺）
+{concept_boards_text}
+
 ## 技术指标
 - MA5: {ma5}  MA10: {ma10}  MA20: {ma20}  MA60: {ma60}
 - MACD DIF: {dif}  DEA: {dea}  柱: {macd_bar}
@@ -888,8 +906,18 @@ _NATURAL_PROMPT = """你是一位资深A股分析师。请基于以下真实数�
 ## 业务结构与投资逻辑
 各业务板块分析、核心竞争力、投资逻辑（含催化剂）。**重要：如果股票涉及市场热门概念（如液冷、AI算力、机器人等），必须列出具体证据链说明为什么该股票属于这个概念——包括：子公司名称、具体产品/技术、已披露订单或合作（含客户名/金额/时间），不能只写"公司涉及XX概念"的泛泛结论。**
 
-## 订单与战略布局
-在手订单、客户结构、研发投入、产能扩张、新业务方向
+## 订单与战略布局（核心模块，重点分析）
+请详细分析以下内容：
+
+**1. 在手订单总额与能见度**：当前在手订单总额估算，订单能见度可到哪个季度/年度，对比历史水平是增长还是下降。
+
+**2. 重大客户订单列表**：按客户逐条列出已知的重大订单/合同，包括：客户名称、订单内容/产品、金额范围、签订时间、交付状态（新签/交付中/已验收）。如果你对该公司的订单情况有专业知识，请基于行业认知做合理推断，但注明推断依据。确实不了解的写"暂无公开披露数据"。
+
+**3. 客户结构分析**：客户集中度（前五大客户占比）、国内外客户比例、客户结构优化趋势、单一客户依赖风险。
+
+**4. 新合同/新业务方向**：近期新签合同动态、新拓展的业务方向或客户、海外市场突破。
+
+**5. 研发与产能**：研发投入方向、产能扩张计划、新业务/第二曲线布局。
 
 ## 估值分析
 当前估值水平评估、估值情景分析（保守/中性/乐观）
@@ -914,6 +942,7 @@ _NATURAL_PROMPT = """你是一位资深A股分析师。请基于以下真实数�
 - 每个章节写2-3段，不要过于简略
 - 不要编造数据，不确定的写"数据暂缺"
 - **概念归属必须有证据链**：当判断某股票属于某个热门概念（如液冷、AI算力、机器人等）时，必须列出新闻/公告中能找到的具体证据（产品名、订单/合同、合作客户名、子公司业务等）。不能只给结论不列证据。如果新闻中没提到客户名，写"客户名称未披露"，不要猜测。
+- **订单与战略布局是核心模块**：数据区中列出的订单/合同仅是近期新闻抓取结果，覆盖面有限。你对这家公司有丰富的训练知识（包括定期报告、券商研报、投资者交流纪要、公司公告），请积极调用这些知识来充实订单分析。如果数据区未列出但你知道的信息，请大胆纳入分析。
 """
 
 # Mapping from Markdown ## headers to ai_analysis dict keys
@@ -930,23 +959,24 @@ _SECTION_MAP = {
 
 
 def analyze_stock_natural(quote: dict, ind: dict, flow: dict,
-                           kline: list = None, order_news: list = None,
+                           news: list = None, kline: list = None, order_news: list = None,
                            data_10jqka: dict = None, financial_data: dict = None,
                            peer_comparison: dict = None,
-                           revenue_composition: dict = None) -> dict:
+                           revenue_composition: dict = None,
+                           concept_boards: list = None) -> dict:
     """Call DeepSeek with natural language prompt, get Markdown analysis back.
 
     Returns parsed dict compatible with existing ai_analysis structure.
     """
     api_key = load_api_key("QWEN_ENC_KEY")
-    prompt = _build_natural_prompt(quote, ind, flow, kline, order_news,
+    prompt = _build_natural_prompt(quote, ind, flow, news, kline, order_news,
                                     data_10jqka, financial_data, peer_comparison,
-                                    revenue_composition)
+                                    revenue_composition, concept_boards)
 
     payload = json.dumps({
         "model": MODEL,
         "messages": [
-            {"role": "system", "content": "你是一位资深A股分析师。请基于提供的真实数据做深度分析，输出Markdown格式报告。分析要专业、客观、有数据支撑。对新闻和订单部分，可以结合你的专业知识做适度补充，使分析更全面。财务数据必须基于提供的数据，不可编造。"},
+            {"role": "system", "content": "你是一位资深A股分析师。请基于提供的真实数据做深度分析，输出Markdown格式报告。分析要专业、客观、有数据支撑。\n\n**核心要求**：订单与战略布局模块是报告的重中之重。请结合你对这家公司产业地位的专业知识，重点分析：1）在手订单总额及能见度（可到哪个季度）；2）重大客户订单（列出客户名、订单内容、金额范围、交付状态）；3）客户结构（集中度、国内外占比）；4）新签合同和业务拓展方向。即使部分数据需要基于行业认知做合理推断，也要给出有价值的分析。\n\n财务数据必须基于提供的数据，不可编造精确数字。"},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.7,
@@ -1080,10 +1110,11 @@ def parse_ai_markdown(markdown_text: str, stock_code: str = "") -> dict:
 
 
 def _build_natural_prompt(quote: dict, ind: dict, flow: dict,
-                           kline: list = None, order_news: list = None,
+                           news: list = None, kline: list = None, order_news: list = None,
                            data_10jqka: dict = None, financial_data: dict = None,
                            peer_comparison: dict = None,
-                           revenue_composition: dict = None) -> str:
+                           revenue_composition: dict = None,
+                           concept_boards: list = None) -> str:
     """Build natural language analysis prompt with all crawled data."""
     name = quote.get("name", "")
     code = quote.get("code", "")
@@ -1100,7 +1131,7 @@ def _build_natural_prompt(quote: dict, ind: dict, flow: dict,
         kline_text = "\n".join(lines_k)
 
     # News summary
-    order_news_text = "暂无订单/合同公告"
+    order_news_text = "请基于你的训练知识，回忆并详细列出 {stock_name}（{stock_code}）近期公开披露的重大订单、合同及合作进展。包括：客户名称、订单内容/产品、金额范围、签订时间、交付状态。如果你确实不知道，请如实填写'训练知识中暂无相关信息'，但不要编造。".format(stock_name=name, stock_code=code)
     if order_news:
         ol = []
         for item in order_news[:6]:
@@ -1109,7 +1140,7 @@ def _build_natural_prompt(quote: dict, ind: dict, flow: dict,
             content = item.get("content", "")
             ol.append("- [{}] {}: {}".format(source, title, (content or "")[:150]))
         if ol:
-            order_news_text = "\n".join(ol)
+            order_news_text = "以下是从新闻中抓取到的订单/合同信息（同时请结合你的训练知识进行补充）：\n" + "\n".join(ol)
 
     # Fund flow
     fund_text = "暂无资金流向数据"
@@ -1231,6 +1262,15 @@ def _build_natural_prompt(quote: dict, ind: dict, flow: dict,
         if len(rc_lines) > 1:
             revenue_composition_text = "\n".join(rc_lines)
 
+    # 格式化概念板块
+    concept_boards_text = "未获取到概念板块数据"
+    if concept_boards:
+        cb_names = [cb.get("board_name", "") for cb in concept_boards if cb.get("board_name")]
+        if cb_names:
+            concept_boards_text = "该股票被同花顺归类到以下概念板块：\n"
+            concept_boards_text += "\n".join("- " + n for n in cb_names)
+            concept_boards_text += "\n\n请在分析中重点关注以上概念板块，特别是属于当前市场热点的板块，结合股票的基本面判断其与这些概念的关联性。即使某些概念与该股票无实质关联，也要明确指出并说明原因。"
+
     return _NATURAL_PROMPT.format(
         stock_name=name, stock_code=code, price=p,
         change_pct=quote.get("change_pct", 0),
@@ -1249,4 +1289,6 @@ def _build_natural_prompt(quote: dict, ind: dict, flow: dict,
         industry_compare_text=industry_compare_text, main_net_text=main_net_text,
         financial_data_text=financial_data_text, peer_comparison_text=peer_comparison_text,
         revenue_composition_text=revenue_composition_text,
+        order_news_text=order_news_text,
+        concept_boards_text=concept_boards_text,
     )
