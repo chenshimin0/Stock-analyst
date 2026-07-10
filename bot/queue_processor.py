@@ -13,6 +13,7 @@ import os
 import sys
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeoutError
 from datetime import date, datetime
 from pathlib import Path
 
@@ -38,6 +39,7 @@ except ImportError:
 QUEUE_DIR = os.getenv("QUEUE_DIR", os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "backend", "queue"))
 WEB_API_URL = os.getenv("WEB_API_URL", "http://localhost:8000/api")
 POLL_INTERVAL = int(os.getenv("QUEUE_POLL_INTERVAL", "15"))  # seconds
+PROCESS_TIMEOUT = int(os.getenv("PROCESS_TIMEOUT", "600"))   # 10 min per stock
 
 logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(message)s",
@@ -663,7 +665,17 @@ def process_queue():
                 os.remove(fpath)
                 continue
 
-            success = process_one(code, name)
+            # Run in thread with timeout to prevent hung processes blocking the queue
+            success = False
+            with ThreadPoolExecutor(max_workers=1) as pool:
+                future = pool.submit(process_one, code, name)
+                try:
+                    success = future.result(timeout=PROCESS_TIMEOUT)
+                except FutureTimeoutError:
+                    logger.error(
+                        f"TIMEOUT: {code} {name} exceeded {PROCESS_TIMEOUT}s — "
+                        f"skipping (thread may still be running in background)"
+                    )
 
             if success:
                 os.remove(fpath)
