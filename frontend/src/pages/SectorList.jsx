@@ -214,7 +214,7 @@ export default function SectorList() {
                           <tbody>
                             {detail.data.stocks.map((s, i) => (
                               <tr key={i} style={{ borderBottom: '1px solid #e8eaf0' }}>
-                                <td style={td}><span style={{fontFamily:'monospace',fontSize:13}}>{s.code}</span></td>
+                                <td style={td}><a href={`https://www.iwencai.com/screener/result?w=${encodeURIComponent(s.code)}`} target="_blank" rel="noopener" style={{textDecoration:'none'}} title={`在 i 问财查看 ${s.code}`}><code style={{fontSize:12,color:'#93c5fd'}}>{s.code}</code></a></td>
                                 <td style={{...td, fontWeight:600}}>{s.name}</td>
                                 <td style={{...td, fontSize:12}}>{s.reason || '—'}</td>
                                 <td style={td}>{s.t0_price != null ? s.t0_price.toFixed(2) : '—'}</td>

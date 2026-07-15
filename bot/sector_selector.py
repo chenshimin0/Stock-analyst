@@ -203,39 +203,11 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
 
 
 def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
-    """
-    Prompt for DeepSeek to pick 3 stocks.
-    If `candidates` is non-empty, the prompt shows the live data table and asks
-    DeepSeek to pick FROM the table. Otherwise (fallback), it asks DeepSeek
-    to use its own knowledge.
-    """
-    if not candidates:
-        return f"""你是一位资深A股产业研究员。用户向你咨询「{concept_name}」概念板块，请基于你的专业知识推荐 3 只最相关的A股股票。
-## 选股标准
-- 沪深主板（60/00开头），排除 300/688/8 开头，非 ST
-- 行业龙头优先
-- 产业链上下游均算关联
-
-## 输出格式（严格 JSON，无其他文字）
-{{"picks":[
-  {{"code":"6位代码","name":"股票简称","reason":"产业链环节 + 龙头证据 + 与「{concept_name}」的关联逻辑（30-60字）"}}
-]}}
-**必须恰好 3 只。**
-"""
-    rows = "\n".join(
-        f"| {c['code']} | {c['name']} | {c['mcap_yi']:.0f} | {c['pe_ttm']:.1f} |"
-        for c in candidates
-    )
+    """Prompt for DeepSeek to pick 3 stocks using its own knowledge only."""
     return f"""你是一位资深A股产业研究员。用户向你咨询「{concept_name}」概念板块，请基于你的专业知识推荐 3 只最相关的A股股票。
 ## 选股标准
 - 沪深主板（60/00开头），排除 300/688/8 开头，非 ST
-- 行业龙头优先
-- 产业链上下游均算关联
-
-**候选池**（已通过 API 实时拉取）：
-
-| 代码 | 名称 | 市值(亿) | PE-TTM |
-{rows}
+- 行业龙头优先，垄断性优先
 
 ## 输出格式（严格 JSON，无其他文字）
 {{"picks":[
@@ -333,15 +305,6 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
     """
     MAX_RETRIES = 2
 
-    candidates = build_concept_candidate_pool(concept_name, db_session)
-    # If pool has < 3 stocks, the prompt becomes confusing ("pick 3 from 1").
-    # Fall back to pure-knowledge mode so DeepSeek picks freely.
-    if len(candidates) < 3:
-        candidates = None
-        source = "ai_knowledge"
-    else:
-        source = "candidates"
-
     rejected_codes: list[str] = []
     rejected_reasons: list[str] = []
     for attempt in range(MAX_RETRIES):
@@ -350,10 +313,7 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
             rejected_note = "\n\n注意：上一次 picks 中以下代码被系统拒收，请重新选股时避开：\n" + \
                 "\n".join(f"- {c} ({r})" for c, r in zip(rejected_codes, rejected_reasons)) + \
                 "\n请重新推荐 3 只合规股票。"
-        if source == "candidates":
-            prompt = build_prompt_ai_knowledge(concept_name, candidates) + rejected_note
-        else:
-            prompt = build_prompt_ai_knowledge(concept_name, None) + rejected_note
+        prompt = build_prompt_ai_knowledge(concept_name) + rejected_note
         raw = deepseek_callable(prompt)
         parsed = parse_deepseek_response(raw)
         if "picks" not in parsed:
@@ -363,6 +323,30 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
         valid, rejected = validate_picks(parsed["picks"])
         rejected_codes = [p["code"] for p in rejected]
         rejected_reasons = ["; ".join(p.get("reject_reasons", [])) for p in rejected]
+
+        # Concept relevance check: each pick's reason must contain at least
+        # one keyword from the concept name. This prevents picks meant for
+        # a different concept (e.g. '高纯5N氧化镝' stocks in 'HBM4' picks)
+        # from contaminating the selection.
+        concept_keywords = [w for w in re.split(r'[\s\d]+', concept_name.lower()) if len(w) >= 2]
+        if concept_keywords:
+            relevant = []
+            for p in valid:
+                reason_lower = p.get("reason", "").lower()
+                if any(kw in reason_lower for kw in concept_keywords):
+                    relevant.append(p)
+                else:
+                    logger.warning(
+                        f"Rejected {p['code']} {p['name']} for '{concept_name}': "
+                        f"reason doesn't mention concept keywords {concept_keywords}"
+                    )
+                    rejected.append({**p, "reject_reasons": [
+                        f"选股理由未提及概念关键词 {concept_keywords}，疑似为其他概念的推荐"
+                    ]})
+            valid = relevant
+
+        rejected_codes = [p["code"] for p in rejected]
+        rejected_reasons = ["; ".join(p.get("reject_reasons", [])) for p in rejected]
         if len(valid) >= 3:
-            return {"picks": valid[:3], "source": source, "rejected": rejected}
+            return {"picks": valid[:3], "source": "ai_knowledge", "rejected": rejected}
     return {"error": f"选股经过 {MAX_RETRIES} 轮仍无法凑齐 3 只合规股票。已拒绝: {rejected_codes or '无'}"}
