@@ -612,6 +612,16 @@ def build_analysis_data(code: str) -> Optional[dict]:
     data_10jqka["pywencai_valuation"] = pywencai_valuation
     data_10jqka["pywencai_events"] = pywencai_events
 
+    # ---- Margin financing data (SSE/SZSE official APIs) ----
+    margin_data = []
+    try:
+        from astock_data import get_margin_data
+        margin_data = get_margin_data(code, days=8)
+        if margin_data:
+            logger.info(f"Margin data for {code}: {len(margin_data)} days")
+    except Exception as e:
+        logger.debug(f"Margin data skipped for {code}: {e}")
+
     return {
         "quote": quote, "name": name, "code": code,
         "ind": ind, "flow": flow, "news": all_news,
@@ -625,6 +635,7 @@ def build_analysis_data(code: str) -> Optional[dict]:
         "revenue_composition": revenue_composition,
         "pywencai_valuation": pywencai_valuation,
         "pywencai_events": pywencai_events,
+        "margin_data": margin_data,
     }
 
 

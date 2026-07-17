@@ -91,7 +91,8 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
                        filtered_concept_boards: list = None,
                        data_10jqka: dict = None, financial_data_raw: dict = None,
                        peer_comparison_raw: dict = None,
-                       revenue_composition: dict = None):
+                       revenue_composition: dict = None,
+                       margin_data: list = None):
     """Save the complete analysis report to the web backend."""
     # Ensure revenue composition is always populated — retry if empty
     if not revenue_composition or not revenue_composition.get("by_product"):
@@ -465,6 +466,7 @@ def save_report_to_web(code: str, name: str, quote: dict, ind: dict,
             "fund_flow_recent": fund_flow_recent,
             "last_limit_up_date": last_limit_up_date,
             "last_limit_up_days_ago": last_limit_up_days_ago,
+            "margin_data": margin_data or [],
         }
 
         data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
@@ -510,6 +512,7 @@ def process_one(code: str, name: str = "") -> bool:
         financial_data = data.get("financial_data", {})
         peer_comparison = data.get("peer_comparison", {})
         revenue_composition = data.get("revenue_composition", {})
+        margin_data = data.get("margin_data", [])
 
         # 2. DeepSeek AI analysis — runs both structured JSON + natural Markdown
         ai_data = None
@@ -597,7 +600,8 @@ def process_one(code: str, name: str = "") -> bool:
                            kline, ai_data, order_news, sector_data, concept_boards,
                            filtered_concept_boards,
                            data_10jqka, financial_data, peer_comparison,
-                           revenue_composition=revenue_composition)
+                           revenue_composition=revenue_composition,
+                           margin_data=margin_data)
 
         # 5. Print report summary (use updated sc & sector_data)
         data["sc"] = sc

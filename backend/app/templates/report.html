@@ -905,6 +905,109 @@ tr:hover{background:#f5f9ff}
 </div>
 {% endif %}
 
+<!-- 融资融券 -->
+{% set margin = margin_data or [] %}
+{% set margin_3d = margin[:3] %}
+{% if margin %}
+<div class="section">
+  <div class="section-title">📊 融资融券</div>
+
+  {# === 近 3 日 summary cards === #}
+  {% if margin_3d %}
+  <div class="card" style="margin-bottom:12px">
+    <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 3 日融资概况</div>
+    {% set total_rzjm_3d = margin_3d | sum(attribute='rz_jm') %}
+    {% set in_3d = margin_3d | selectattr('rz_jm', 'gt', 0) | list | length %}
+    {% set out_3d = margin_3d | selectattr('rz_jm', 'lt', 0) | list | length %}
+    <div class="card-grid-2" style="margin-bottom:0">
+      <div>
+        <div class="stat-label">近 3 日融资净买入合计</div>
+        <div class="stat-value {% if total_rzjm_3d > 0 %}up{% elif total_rzjm_3d < 0 %}down{% else %}blue{% endif %}">
+          {% if total_rzjm_3d > 0 %}+{% endif %}{{ "%.2f"|format(total_rzjm_3d / 100000000) }}亿
+        </div>
+        <div class="stat-sub">{{ "%.0f"|format(total_rzjm_3d / 10000) }} 万元</div>
+      </div>
+      <div>
+        <div class="stat-label">净流入 / 净流出天数</div>
+        <div class="stat-value blue">{{ in_3d }} 天 / {{ out_3d }} 天</div>
+        <div class="stat-sub">近 3 个交易日</div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# === 近 5 日: summary cards + table === #}
+  <div class="card" style="margin-bottom:12px">
+    <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 5 日融资融券明细</div>
+    {% set total_rzjm = margin | sum(attribute='rz_jm') %}
+    {% set in_days = margin | selectattr('rz_jm', 'gt', 0) | list | length %}
+    {% set out_days = margin | selectattr('rz_jm', 'lt', 0) | list | length %}
+    <div class="card-grid-3" style="margin-bottom:10px">
+      <div>
+        <div class="stat-label">近 5 日融资净买入合计</div>
+        <div class="stat-value {% if total_rzjm > 0 %}up{% elif total_rzjm < 0 %}down{% else %}blue{% endif %}">
+          {% if total_rzjm > 0 %}+{% endif %}{{ "%.2f"|format(total_rzjm / 100000000) }}亿
+        </div>
+        <div class="stat-sub">{{ "%.0f"|format(total_rzjm / 10000) }} 万元</div>
+      </div>
+      <div>
+        <div class="stat-label">流入天数 / 流出天数</div>
+        <div class="stat-value blue">{{ in_days }} 天 / {{ out_days }} 天</div>
+        <div class="stat-sub">近 5 个交易日</div>
+      </div>
+      <div>
+        <div class="stat-label">最新融资余额</div>
+        {% set latest_rzye = margin[0].rzye if margin[0].rzye else 0 %}
+        <div class="stat-value blue">{{ "%.2f"|format(latest_rzye / 100000000) }}亿</div>
+        <div class="stat-sub">{{ margin[0].date or '' }}</div>
+      </div>
+    </div>
+    <div class="table-wrap" style="margin-bottom:0">
+      <table>
+        <thead>
+          <tr>
+            <th>日期</th>
+            <th class="text-center">融资余额(亿)</th>
+            <th class="text-center">融资买入(万)</th>
+            <th class="text-center">融资偿还(万)</th>
+            <th class="text-center">融资净买入(万)</th>
+            <th class="text-center">融券余量(万股)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for d in margin %}
+          <tr{% if loop.index <= 3 %} style="background:#f0f4ff"{% endif %}>
+            <td>{% if loop.index == 1 %}📌 {% endif %}{{ d.date or '' }}</td>
+            <td class="text-center" style="font-weight:700">{{ "%.2f"|format(d.rzye / 100000000) }}</td>
+            <td class="text-center {% if d.rzmre > 0 %}up{% endif %}">
+              {% if d.rzmre > 0 %}+{% endif %}{{ "%.0f"|format(d.rzmre / 10000) }}
+            </td>
+            <td class="text-center">{{ "%.0f"|format(d.rzche / 10000) }}</td>
+            <td class="text-center {% if d.rz_jm > 0 %}up{% elif d.rz_jm < 0 %}down{% endif %}" style="font-weight:700">
+              {% if d.rz_jm > 0 %}+{% endif %}{{ "%.0f"|format(d.rz_jm / 10000) }}
+            </td>
+            <td class="text-center">{{ "%.2f"|format(d.rqyl / 10000) }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div style="display:flex;gap:12px;margin-bottom:4px">
+    <a href="https://data.eastmoney.com/rzrq/detail/{{ stock_code }}.html" target="_blank" rel="noopener" style="color:#e8562a;font-size:12px;text-decoration:none">📊 东方财富融资融券 →</a>
+    <a href="https://data.10jqka.com.cn/market/rzrqgg/code/{{ stock_code }}/" target="_blank" rel="noopener" style="color:#1565c0;font-size:12px;text-decoration:none">📊 同花顺融资融券 →</a>
+  </div>
+
+  <div class="insight-box yellow" style="margin-bottom:10px">
+    <span class="label">💡 数据说明</span>
+    融资融券数据来源于 {{ '上海证券交易所' if stock_code.startswith('6') else '深圳证券交易所' }} 官网。
+    融资余额反映市场杠杆做多情绪，融资净买入为正表示资金加杠杆看多。
+    融券余量反映做空力量，但 A 股融券规模通常较小。数据更新时间可能滞后一个交易日。
+  </div>
+</div>
+{% endif %}
+
 <!-- 4.5 资金面与涨停记录 -->
 {% set ffr = fund_flow_recent or [] %}
 {% set ffr_3d = ffr[:3] %}

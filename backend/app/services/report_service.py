@@ -133,6 +133,8 @@ class ReportService:
                 existing.last_limit_up_date = data.last_limit_up_date
             if data.last_limit_up_days_ago is not None:
                 existing.last_limit_up_days_ago = data.last_limit_up_days_ago
+            if data.margin_data is not None:
+                existing.margin_data = data.margin_data
             db.commit()
             db.refresh(existing)
             return existing
@@ -161,6 +163,7 @@ class ReportService:
             data_10jqka=data.data_10jqka,
             financial_data_raw=data.financial_data_raw,
             peer_comparison_raw=data.peer_comparison_raw,
+            margin_data=data.margin_data,
             revenue_composition_raw=data.revenue_composition_raw,
             fund_flow_recent=data.fund_flow_recent,
             last_limit_up_date=data.last_limit_up_date,

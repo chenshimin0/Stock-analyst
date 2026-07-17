@@ -447,6 +447,168 @@ def get_fund_flow_recent(code: str, days: int = 8) -> list:
     return []
 
 
+# ===================================================================
+# Margin financing (融资融券) data — SSE/SZSE official APIs
+# ===================================================================
+
+def get_margin_data(code: str, days: int = 5) -> list:
+    """Get margin financing (融资融券) data for a stock from exchange APIs.
+
+    - Shanghai (6xxxxx): SSE API with date range
+    - Shenzhen (0xxxxx, 3xxxxx): SZSE API, one call per day
+
+    Returns list of {date, rzye, rzmre, rzche, rqmcl, rqyl, rqylje} dicts
+    (most recent first), or [] if stock isn't margin-eligible or API fails.
+
+    Fields:
+      - rzye:  融资余额 (margin balance, 元)
+      - rzmre: 融资买入额 (margin buy amount, 元)
+      - rzche: 融资偿还额 (margin repayment amount, 元)
+      - rqmcl: 融券卖出量 (short selling volume, 股)
+      - rqyl:  融券余量 (short selling remaining, 股)
+      - rqylje: 融券余额 (short selling balance, 元)
+    """
+    from datetime import date as _date, timedelta
+
+    end_date = _date.today().strftime("%Y%m%d")
+    start_date = (_date.today() - timedelta(days=days + 10)).strftime("%Y%m%d")
+
+    if code.startswith("6"):
+        return _get_margin_sse(code, start_date, end_date, days)
+    elif code.startswith(("0", "3")):
+        return _get_margin_szse(code, days)
+    else:
+        return []
+
+
+def _get_margin_sse(code: str, start_date: str, end_date: str, days: int) -> list:
+    """SSE margin API — supports date range in single call."""
+    try:
+        params = (
+            f"isPagination=true&tabType=mxtype"
+            f"&stockCode={code}"
+            f"&beginDate={start_date}"
+            f"&endDate={end_date}"
+            f"&pageHelp.pageSize=50"
+            f"&pageHelp.pageNo=1"
+        )
+        url = f"https://query.sse.com.cn/marketdata/tradedata/queryMargin.do?{params}"
+        req = urllib.request.Request(url, headers={
+            "User-Agent": UA,
+            "Referer": "https://www.sse.com.cn/",
+        })
+        resp = urllib.request.urlopen(req, timeout=15)
+        data = json.loads(resp.read().decode())
+
+        result_rows = data.get("result", [])
+        if not result_rows:
+            logger.debug(f"SSE margin: no data for {code} (not margin-eligible)")
+            return []
+
+        out = []
+        for row in result_rows:
+            # row format with tabType=mxtype: dict with keys
+            # {"opDate": "20260710", "rzye": ..., "rzmre": ..., "rzche": ...,
+            #  "rqmcl": ..., "rqyl": ..., "rqylje": ..., "stockCode": ..., "securityAbbr": ...}
+            try:
+                entry = {
+                    "date": str(row.get("opDate", ""))[:10],
+                    "rzye": float(row.get("rzye", 0) or 0),
+                    "rzmre": float(row.get("rzmre", 0) or 0),
+                    "rzche": float(row.get("rzche", 0) or 0),
+                    "rqmcl": float(row.get("rqmcl", 0) or 0),
+                    "rqyl": float(row.get("rqyl", 0) or 0),
+                    "rqylje": float(row.get("rqylje", 0) or 0),
+                }
+                entry["rz_jm"] = entry["rzmre"] - entry["rzche"]
+                out.append(entry)
+            except (ValueError, TypeError):
+                continue
+
+        # Sort by date descending, take top N
+        out.sort(key=lambda x: x["date"], reverse=True)
+        out = out[:days]
+
+        if out:
+            logger.info(f"SSE margin data for {code}: {len(out)} days")
+        return out
+    except Exception as e:
+        logger.warning(f"SSE margin API failed for {code}: {e}")
+        return []
+
+
+def _get_margin_szse(code: str, days: int) -> list:
+    """SZSE margin API — single date per call, loop over recent trading days."""
+    from datetime import date as _date, timedelta
+    import requests as _requests
+    from io import BytesIO
+
+    out = []
+    seen_dates = set()
+    # Try last 15 calendar days to get N trading days
+    for i in range(15):
+        d = (_date.today() - timedelta(days=i)).strftime("%Y-%m-%d")
+        if d in seen_dates:
+            continue
+        seen_dates.add(d)
+        try:
+            params = {
+                "SHOWTYPE": "xlsx",
+                "CATALOGID": "1837_xxpl",
+                "txtDate": d,
+                "tab2PAGENO": "1",
+                "random": "0.24279342734085696",
+                "TABKEY": "tab2",
+            }
+            headers = {
+                "Referer": "https://www.szse.cn/disclosure/margin/margin/index.html",
+                "User-Agent": UA,
+            }
+            r = _requests.get(
+                "https://www.szse.cn/api/report/ShowReport",
+                params=params, headers=headers, timeout=15
+            )
+            if r.status_code != 200 or not r.content:
+                continue
+
+            import pandas as pd
+            import warnings
+            with warnings.catch_warnings(record=True):
+                warnings.simplefilter("always")
+                df = pd.read_excel(BytesIO(r.content), engine="openpyxl", dtype={"证券代码": str})
+
+            df.columns = ["证券代码", "证券简称", "融资买入额", "融资余额",
+                          "融券卖出量", "融券余量", "融券余额", "融资融券余额"]
+            row = df[df["证券代码"] == code]
+            if row.empty:
+                continue
+
+            r0 = row.iloc[0]
+            entry = {
+                "date": d,
+                "rzye": float(str(r0["融资余额"]).replace(",", "")) if pd.notna(r0["融资余额"]) else 0,
+                "rzmre": float(str(r0["融资买入额"]).replace(",", "")) if pd.notna(r0["融资买入额"]) else 0,
+                "rzche": 0,  # SZSE doesn't provide 融资偿还额 separately
+                "rqmcl": float(str(r0["融券卖出量"]).replace(",", "")) if pd.notna(r0["融券卖出量"]) else 0,
+                "rqyl": float(str(r0["融券余量"]).replace(",", "")) if pd.notna(r0["融券余量"]) else 0,
+                "rqylje": float(str(r0["融券余额"]).replace(",", "")) if pd.notna(r0["融券余额"]) else 0,
+            }
+            entry["rz_jm"] = 0  # SZSE doesn't provide net buy separately
+            out.append(entry)
+
+            if len(out) >= days:
+                break
+        except Exception as e:
+            logger.debug(f"SZSE margin fetch failed for {code} on {d}: {e}")
+            continue
+
+    if out:
+        logger.info(f"SZSE margin data for {code}: {len(out)} days")
+    else:
+        logger.debug(f"SZSE margin: no data for {code} (not margin-eligible)")
+    return out
+
+
 # ---------------------------------------------------------------------------
 # pywencai data extractors — pull specific sections from cached stock data
 # ---------------------------------------------------------------------------

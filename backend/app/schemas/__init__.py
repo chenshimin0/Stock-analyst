@@ -31,6 +31,7 @@ class ReportCreate(BaseModel):
     last_limit_up_date: Optional[str] = None
     last_limit_up_days_ago: Optional[int] = None
     adjusted_price_at_report: Optional[float] = None
+    margin_data: Optional[list] = None
 
 
 class ReportUpdate(BaseModel):
@@ -99,6 +100,7 @@ class ReportDetail(BaseModel):
     financial_data_raw: Optional[dict] = None
     peer_comparison_raw: Optional[dict] = None
     revenue_composition_raw: Optional[dict] = None
+    margin_data: Optional[list] = None
     created_at: Optional[datetime] = None
 
     model_config = {"from_attributes": True}

@@ -38,6 +38,7 @@ class Report(Base):
     fund_flow_refreshed_at = Column(Date, nullable=True)
     last_limit_up_date = Column(String(20), nullable=True)
     last_limit_up_days_ago = Column(Integer, nullable=True)
+    margin_data = Column(JSON, nullable=True)
     created_at = Column(DateTime, server_default=func.now())
 
     price_snapshots = relationship("PriceSnapshot", back_populates="report", cascade="all, delete-orphan")
