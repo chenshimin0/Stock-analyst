@@ -54,25 +54,25 @@ def _prune_concept_locks():
 # The sector_selector now runs DuckDuckGo search and feeds results
 # into the prompt, so the model has current web data to work from.
 def call_deepseek(prompt: str) -> str:
-    """Call DeepSeek API for sector stock picking."""
+    """Call Qwen API (with web search) for sector stock picking."""
     import json as _json
     import urllib.request as _urllib
-    from ai_analyzer import load_api_key  # type: ignore
+    from ai_analyzer import load_api_key, QWEN_URL  # type: ignore
 
-    api_key = load_api_key("DEEPSEEK_ENC_KEY")
-    DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
+    api_key = load_api_key("QWEN_ENC_KEY")
 
     payload = _json.dumps({
-        "model": "deepseek-chat",
+        "model": "qwen-plus",
         "messages": [
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.1,
         "max_tokens": 2048,
+        "enable_search": True,
     }, ensure_ascii=False).encode("utf-8")
 
     req = _urllib.Request(
-        DEEPSEEK_URL,
+        QWEN_URL,
         data=payload,
         headers={
             "Content-Type": "application/json",
@@ -83,11 +83,11 @@ def call_deepseek(prompt: str) -> str:
         resp = _urllib.urlopen(req, timeout=90)
         result = _json.loads(resp.read())
         content = result["choices"][0]["message"]["content"]
-        logger.info(f"DeepSeek sector pick completed ({len(content)} chars)")
+        logger.info(f"Qwen sector pick completed ({len(content)} chars)")
         return content
     except Exception as e:
-        logger.error(f"DeepSeek API call failed: {e}")
-        raise RuntimeError(f"DeepSeek API call failed: {e}") from e
+        logger.error(f"Qwen API call failed: {e}")
+        raise RuntimeError(f"Qwen API call failed: {e}") from e
 
 
 # In-memory map: user_id -> sector_name awaiting confirmation
