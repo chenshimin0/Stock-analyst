@@ -388,6 +388,7 @@ class ReportService:
             "fund_flow_recent": report.fund_flow_recent,
             "last_limit_up_date": report.last_limit_up_date,
             "last_limit_up_days_ago": report.last_limit_up_days_ago,
+            "margin_data": report.margin_data,
             "created_at": report.created_at,
             "realtime": price_data,
         }

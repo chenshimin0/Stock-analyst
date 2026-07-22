@@ -593,7 +593,8 @@ def _get_margin_szse(code: str, days: int) -> list:
                 "rqyl": float(str(r0["融券余量"]).replace(",", "")) if pd.notna(r0["融券余量"]) else 0,
                 "rqylje": float(str(r0["融券余额"]).replace(",", "")) if pd.notna(r0["融券余额"]) else 0,
             }
-            entry["rz_jm"] = 0  # SZSE doesn't provide net buy separately
+            # Net margin buy = change in balance (SZSE lacks 融资偿还)
+            entry["rz_jm"] = 0  # computed below after all days collected
             out.append(entry)
 
             if len(out) >= days:
@@ -603,6 +604,14 @@ def _get_margin_szse(code: str, days: int) -> list:
             continue
 
     if out:
+        # Compute net margin buy from day-over-day balance change
+        # out is in date-descending order (newest first)
+        for i in range(len(out) - 1):
+            out[i]["rz_jm"] = out[i]["rzye"] - out[i + 1]["rzye"]
+        # oldest day: can't compute net without prior balance
+        if len(out) > 0:
+            out[-1]["rz_jm"] = 0
+
         logger.info(f"SZSE margin data for {code}: {len(out)} days")
     else:
         logger.debug(f"SZSE margin: no data for {code} (not margin-eligible)")

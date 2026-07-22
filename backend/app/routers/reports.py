@@ -208,7 +208,7 @@ def update_report(report_id: str, data: ReportUpdate, db: Session = Depends(get_
 
 @router.post("/{report_id}/rerun")
 def rerun_report(report_id: str, db: Session = Depends(get_db)):
-    """Queue a stock for re-analysis. Returns immediately."""
+    """Delete existing report and queue stock for fresh re-analysis."""
     import os as _os, json as _json
     q = db.query(Report)
     if report_id.isdigit() and len(report_id) <= 4:
@@ -221,15 +221,36 @@ def rerun_report(report_id: str, db: Session = Depends(get_db)):
         )
     if not report:
         raise HTTPException(status_code=404, detail="Report not found")
-    # Update created_at to now so frontend shows fresh timestamp immediately
-    report.created_at = datetime.utcnow()
+
+    stock_code = report.stock_code
+    stock_name = report.stock_name
+
+    # Delete existing report
+    db.delete(report)
     db.commit()
+
+    # Create pending placeholder immediately
+    try:
+        from app.schemas import ReportCreate
+        from app.services.report_service import ReportService
+        pending = ReportCreate(
+            stock_code=stock_code,
+            stock_name=stock_name,
+            report_date=datetime.utcnow().date(),
+            price_at_report=0,
+            label="分析中...",
+        )
+        ReportService.create_report(db, pending)
+    except Exception:
+        pass  # silent — queue processor will create proper report anyway
+
+    # Queue for re-analysis
     queue_dir = _os.getenv("QUEUE_DIR", "/home/ubuntu/stock-analysis-system/backend/queue")
     _os.makedirs(queue_dir, exist_ok=True)
-    fpath = _os.path.join(queue_dir, f"{report.stock_code}.json")
+    fpath = _os.path.join(queue_dir, f"{stock_code}.json")
     with open(fpath, "w") as f:
-        _json.dump({"stock_code": report.stock_code, "stock_name": report.stock_name}, f)
-    return {"detail": "queued", "stock_code": report.stock_code}
+        _json.dump({"stock_code": stock_code, "stock_name": stock_name}, f)
+    return {"detail": "deleted and re-queued", "stock_code": stock_code}
 
 
 @router.get("/{report_id}/winrate", response_model=WinRateResponse)

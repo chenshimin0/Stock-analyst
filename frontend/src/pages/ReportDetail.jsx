@@ -9,26 +9,14 @@ export default function ReportDetail() {
   const [rerunning, setRerunning] = useState(false);
 
   const handleRerun = async () => {
+    if (!confirm('确认删除当前报告并重新分析？')) return;
     setRerunning(true);
     try {
       const r = await fetch(`/api/reports/${slug}/rerun`, { method: 'POST' });
       if (!r.ok) throw new Error(`HTTP ${r.status}`);
-      const data = await r.json();
-      // Poll until report updates
-      let attempts = 0;
-      while (attempts < 120) {
-        await new Promise(resolve => setTimeout(resolve, 3000));
-        const check = await fetch(`/api/reports/${slug}?format=html`);
-        const newHtml = await check.text();
-        if (newHtml !== html && !newHtml.includes('Report not found')) {
-          setHtml(newHtml);
-          break;
-        }
-        attempts++;
-      }
+      navigate('/');
     } catch (e) {
       alert(`重新分析失败: ${e.message}`);
-    } finally {
       setRerunning(false);
     }
   };

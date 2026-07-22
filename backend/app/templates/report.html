@@ -939,9 +939,10 @@ tr:hover{background:#f5f9ff}
   {# === 近 5 日: summary cards + table === #}
   <div class="card" style="margin-bottom:12px">
     <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:10px">近 5 日融资融券明细</div>
-    {% set total_rzjm = margin | sum(attribute='rz_jm') %}
-    {% set in_days = margin | selectattr('rz_jm', 'gt', 0) | list | length %}
-    {% set out_days = margin | selectattr('rz_jm', 'lt', 0) | list | length %}
+    {% set margin_5d = margin[:5] %}
+    {% set total_rzjm = margin_5d | sum(attribute='rz_jm') %}
+    {% set in_days = margin_5d | selectattr('rz_jm', 'gt', 0) | list | length %}
+    {% set out_days = margin_5d | selectattr('rz_jm', 'lt', 0) | list | length %}
     <div class="card-grid-3" style="margin-bottom:10px">
       <div>
         <div class="stat-label">近 5 日融资净买入合计</div>
@@ -975,14 +976,14 @@ tr:hover{background:#f5f9ff}
           </tr>
         </thead>
         <tbody>
-          {% for d in margin %}
+          {% for d in margin[:5] %}
           <tr{% if loop.index <= 3 %} style="background:#f0f4ff"{% endif %}>
             <td>{% if loop.index == 1 %}📌 {% endif %}{{ d.date or '' }}</td>
             <td class="text-center" style="font-weight:700">{{ "%.2f"|format(d.rzye / 100000000) }}</td>
             <td class="text-center {% if d.rzmre > 0 %}up{% endif %}">
               {% if d.rzmre > 0 %}+{% endif %}{{ "%.0f"|format(d.rzmre / 10000) }}
             </td>
-            <td class="text-center">{{ "%.0f"|format(d.rzche / 10000) }}</td>
+            <td class="text-center">{{ "%.0f"|format(d.rzche / 10000) if d.rzche else "—" }}</td>
             <td class="text-center {% if d.rz_jm > 0 %}up{% elif d.rz_jm < 0 %}down{% endif %}" style="font-weight:700">
               {% if d.rz_jm > 0 %}+{% endif %}{{ "%.0f"|format(d.rz_jm / 10000) }}
             </td>
@@ -1002,8 +1003,9 @@ tr:hover{background:#f5f9ff}
   <div class="insight-box yellow" style="margin-bottom:10px">
     <span class="label">💡 数据说明</span>
     融资融券数据来源于 {{ '上海证券交易所' if stock_code.startswith('6') else '深圳证券交易所' }} 官网。
-    融资余额反映市场杠杆做多情绪，融资净买入为正表示资金加杠杆看多。
-    融券余量反映做空力量，但 A 股融券规模通常较小。数据更新时间可能滞后一个交易日。
+    融资余额反映市场杠杆做多情绪，融资净买入（融资余额日间变化）为正表示资金加杠杆看多。
+    深交所不提供融资偿还额（显示为"—"），上交所数据含完整的融资买入/偿还明细。
+    融券余量反映做空力量，A 股融券规模通常较小。数据更新可能滞后一个交易日。
   </div>
 </div>
 {% endif %}
