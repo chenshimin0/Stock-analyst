@@ -238,6 +238,22 @@ async def _run_new_pick_in_chat(bot, chat_id: int, concept_name: str):
                     t0_price=t0_price or None,
                     t0_avg_price=None,
                 ))
+            db.flush()
+            # Defensive: delete any excess stocks that somehow exceeded the limit
+            excess = (
+                db.query(SectorPickStock)
+                .filter(SectorPickStock.sector_pick_id == pick.id)
+                .all()
+            )
+            if len(excess) > 3:
+                logger.error(
+                    f"BUG: pick {pick.id} has {len(excess)} stocks — "
+                    f"deleting {len(excess) - 3} excess. "
+                    f"Codes: {[s.stock_code for s in excess]}"
+                )
+                # Keep first 3, delete the rest
+                for s in excess[3:]:
+                    db.delete(s)
             db.commit()
             # Reply
             lines = [

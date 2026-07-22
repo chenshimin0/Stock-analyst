@@ -26,11 +26,13 @@ logger = logging.getLogger(__name__)
 # =================================================================
 # Board filters
 # =================================================================
-def is_main_board(code: str) -> bool:
-    """6-prefix Shanghai main + 0-prefix Shenzhen main (incl 002 SME). Excludes ChiNext/STAR/BSE."""
+def is_eligible_board(code: str) -> bool:
+    """Allow main board (60/00) + ChiNext (30). Exclude STAR (688), BSE (8/4/9)."""
     if code.startswith("688"):
-        return False  # STAR market
-    return code.startswith("6") or code.startswith("0")
+        return False  # STAR market — high risk, different mechanism
+    if code.startswith(("8", "4", "9")):
+        return False  # BSE / B-shares
+    return code.startswith(("6", "0", "3"))
 
 
 def is_st(name: str) -> bool:
@@ -180,7 +182,7 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
         if not q:
             continue
         code = m["stock_code"]
-        if not is_main_board(code) or is_st(m["stock_name"]):
+        if not is_eligible_board(code) or is_st(m["stock_name"]):
             continue
         # No market cap or PE filter — DeepSeek decides who's a leader.
         # Just require Tencent to give us a live price (mc > 0 means it's a real stock).
@@ -205,16 +207,36 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
 def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
     """Prompt for DeepSeek to pick 3 stocks using its own knowledge only."""
     return f"""你是一位资深A股产业研究员。用户向你咨询「{concept_name}」概念板块，请基于你的专业知识推荐 3 只最相关的A股股票。
+
 ## 选股标准
-- 沪深主板（60/00开头），排除 300/688/8 开头，非 ST
-- 行业龙头优先，垄断性优先
+- 沪深主板（60/00开头）或创业板（30开头），排除 688（科创板）/8（北交所）/4/9 开头
+- 非 ST
+- 行业龙头优先，与概念关联最紧密的优先，技术落地最早的优先
 
 ## 输出格式（严格 JSON，无其他文字）
 {{"picks":[
   {{"code":"6位代码","name":"股票简称","reason":"产业链环节 + 龙头证据 + 与「{concept_name}」的关联逻辑（30-60字）"}}
 ]}}
-**必须恰好 3 只。**
+**必须恰好 3 只。不要输出任何解释、思考过程或额外文字。**
 """
+
+
+# =================================================================
+# Self-negating reason patterns — DeepSeek sometimes writes
+# self-corrections inside the reason field (e.g. "非相关标的，已排除").
+# These picks must be rejected outright.
+# =================================================================
+_SELF_NEGATING_PATTERNS = [
+    "非相关", "已排除", "已剔除", "不相关", "无关",
+    "错误", "更正", "修正", "重新选择", "不涉及",
+    "不适用", "不符合", "不属于", "应选", "正确标的",
+    "搞错了", "搞混了", "弄错了",
+]
+
+
+def _is_self_negating(reason: str) -> bool:
+    """Check if a reason text contains self-negating/self-correcting language."""
+    return any(pat in reason for pat in _SELF_NEGATING_PATTERNS)
 
 
 # =================================================================
@@ -248,6 +270,9 @@ def parse_deepseek_response(raw: str) -> dict:
             return {"error": f"missing field in pick: {p}"}
         if not re.match(r"^\d{6}$", p["code"]):
             return {"error": f"invalid code: {p['code']}"}
+        # Reject picks where DeepSeek admits the stock is wrong/irrelevant
+        if _is_self_negating(p.get("reason", "")):
+            return {"error": f"self-negating reason in pick {p['code']} {p['name']}: {p['reason'][:80]}..."}
     return {"picks": picks}
 
 
@@ -274,14 +299,17 @@ def validate_picks(picks: list[dict]) -> tuple[list[dict], list[dict]]:
         reasons = []
         if not re.match(r"^\d{6}$", code):
             reasons.append(f"{code} 不是 6 位代码")
-        elif not is_main_board(code):
-            reasons.append(f"{code} 非主板（科创/创业/B 股/北交所）")
+        elif not is_eligible_board(code):
+            reasons.append(f"{code} 非沪深主板/创业板（科创/B股/北交所已排除）")
         if is_st(name):
             reasons.append(f"{name} 含 ST")
         # Sanity: can Tencent actually quote this code?
         q = get_quote(code)
         if not q:
             reasons.append(f"{code} 拉不到实时行情（代码可能不存在）")
+        # Reject self-negating reasons (DeepSeek self-correction inside reason field)
+        if _is_self_negating(p.get("reason", "")):
+            reasons.append(f"{code} {name} reason 含自我否定/纠错语句，疑似 DeepSeek 输出混入思考过程")
         if reasons:
             rejected.append({**p, "reject_reasons": reasons})
         else:
@@ -324,16 +352,20 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
         rejected_codes = [p["code"] for p in rejected]
         rejected_reasons = ["; ".join(p.get("reject_reasons", [])) for p in rejected]
 
-        # Concept relevance check: each pick's reason must contain at least
-        # one keyword from the concept name. This prevents picks meant for
-        # a different concept (e.g. '高纯5N氧化镝' stocks in 'HBM4' picks)
-        # from contaminating the selection.
+        # Concept relevance check: each pick's reason must mention the
+        # concept name. Normalize by stripping all whitespace from both
+        # the concept and the reason so that "npo 交换机" (with space in
+        # reason) still matches the keyword "npo交换机" (no space).
         concept_keywords = [w for w in re.split(r'[\s\d]+', concept_name.lower()) if len(w) >= 2]
         if concept_keywords:
+            # Build space-stripped versions for robust matching
+            keywords_nospace = [re.sub(r'\s+', '', kw) for kw in concept_keywords]
             relevant = []
             for p in valid:
                 reason_lower = p.get("reason", "").lower()
-                if any(kw in reason_lower for kw in concept_keywords):
+                reason_nospace = re.sub(r'\s+', '', reason_lower)
+                if any(kw in reason_lower or kw_ns in reason_nospace
+                       for kw, kw_ns in zip(concept_keywords, keywords_nospace)):
                     relevant.append(p)
                 else:
                     logger.warning(
