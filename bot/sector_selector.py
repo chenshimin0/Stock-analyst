@@ -206,16 +206,17 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
 
 def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
     """Prompt for DeepSeek to pick 3 stocks using its own knowledge only."""
-    return f"""你是一位资深A股产业研究员。用户向你咨询「{concept_name}」概念板块，请基于你的专业知识推荐 3 只最相关的A股股票。
+    return f"""你是一位专注A股细分赛道的产业研究员。请为「{concept_name}」概念推荐 3 只最直接相关的A股股票。
 
 ## 选股标准
 - 沪深主板（60/00开头）或创业板（30开头），排除 688（科创板）/8（北交所）/4/9 开头
 - 非 ST
-- 行业龙头优先，与概念关联最紧密的优先，技术落地最早的优先
+- **优先选择与概念关联最紧密的专业化公司，而不是大型综合集团**
+- 如果概念较新或较细分，相关龙头很可能在创业板，务必考虑
 
 ## 输出格式（严格 JSON，无其他文字）
 {{"picks":[
-  {{"code":"6位代码","name":"股票简称","reason":"产业链环节 + 龙头证据 + 与「{concept_name}」的关联逻辑（30-60字）"}}
+  {{"code":"6位代码","name":"股票简称","reason":"具体说明该公司在「{concept_name}」产业链中的核心环节与龙头地位（30-60字）"}}
 ]}}
 **必须恰好 3 只。不要输出任何解释、思考过程或额外文字。**
 """

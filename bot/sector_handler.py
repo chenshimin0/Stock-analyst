@@ -50,10 +50,47 @@ def _prune_concept_locks():
     logger.debug("Concept locks pruned")
 
 
-# Real DeepSeek call delegated to ai_analyzer. Caller (sector_selector) parses JSON.
+# Real DeepSeek call with sector-optimized settings: low temperature for
+# factual recall, specialized system prompt to avoid large-cap bias.
 def call_deepseek(prompt: str) -> str:
-    """Thin wrapper around ai_analyzer.call_deepseek_raw. Returns raw model text."""
-    return call_deepseek_raw(prompt)
+    """Call DeepSeek API with low temperature for accurate sector stock picking."""
+    import json as _json
+    import urllib.request as _urllib
+    from ai_analyzer import load_api_key, DEEPSEEK_URL  # type: ignore
+
+    api_key = load_api_key("DEEPSEEK_ENC_KEY")
+    system = (
+        "你是一位专注A股细分赛道的产业研究员。你的特长是挖掘产业链中最直接相关的专业化公司，"
+        "而非推荐大型综合集团。对于新兴/细分概念，优先选择技术落地最早、关联最紧密的企业，"
+        "哪怕它们市值较小或在创业板。严禁输出任何解释、思考过程或自我纠正。"
+    )
+    payload = _json.dumps({
+        "model": "deepseek-chat",
+        "messages": [
+            {"role": "system", "content": system},
+            {"role": "user", "content": prompt},
+        ],
+        "temperature": 0.1,
+        "max_tokens": 2048,
+    }, ensure_ascii=False).encode("utf-8")
+
+    req = _urllib.Request(
+        DEEPSEEK_URL,
+        data=payload,
+        headers={
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        },
+    )
+    try:
+        resp = _urllib.urlopen(req, timeout=90)
+        result = _json.loads(resp.read())
+        content = result["choices"][0]["message"]["content"]
+        logger.info(f"DeepSeek sector pick completed ({len(content)} chars)")
+        return content
+    except Exception as e:
+        logger.error(f"DeepSeek API call failed: {e}")
+        raise RuntimeError(f"DeepSeek API call failed: {e}") from e
 
 
 # In-memory map: user_id -> sector_name awaiting confirmation
