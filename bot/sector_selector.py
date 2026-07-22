@@ -27,12 +27,10 @@ logger = logging.getLogger(__name__)
 # Board filters
 # =================================================================
 def is_eligible_board(code: str) -> bool:
-    """Allow main board (60/00) + ChiNext (30). Exclude STAR (688), BSE (8/4/9)."""
-    if code.startswith("688"):
-        return False  # STAR market — high risk, different mechanism
+    """Exclude only BSE (8) and B-shares (4/9). Allow main/ChiNext/STAR."""
     if code.startswith(("8", "4", "9")):
         return False  # BSE / B-shares
-    return code.startswith(("6", "0", "3"))
+    return len(code) == 6 and code.isdigit()
 
 
 def is_st(name: str) -> bool:
@@ -206,20 +204,15 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
 
 def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
     """Prompt for DeepSeek to pick 3 stocks using its own knowledge only."""
-    return f"""你是一位专注A股细分赛道的产业研究员。请为「{concept_name}」概念推荐 3 只最直接相关的A股股票。
+    return f"""目前{concept_name}的龙头标的有哪些？请推荐 3 只最核心的A股股票。
 
-## 选股标准
-- 沪深主板（60/00开头）或创业板（30开头），排除 688（科创板）/8（北交所）/4/9 开头
-- 非 ST
-- **优先选择与概念关联最紧密的专业化公司，而不是大型综合集团**
-- 如果概念较新或较细分，相关龙头很可能在创业板，务必考虑
+要求：排除北交所（8开头）、B股（4/9开头），排除 ST 股票。
 
-## 输出格式（严格 JSON，无其他文字）
+请严格按以下 JSON 格式输出（不要任何其他文字）：
 {{"picks":[
-  {{"code":"6位代码","name":"股票简称","reason":"具体说明该公司在「{concept_name}」产业链中的核心环节与龙头地位（30-60字）"}}
+  {{"code":"6位代码","name":"股票简称","reason":"一句话说明该公司在{concept_name}中的核心地位"}}
 ]}}
-**必须恰好 3 只。不要输出任何解释、思考过程或额外文字。**
-"""
+必须恰好 3 只。"""
 
 
 # =================================================================
@@ -301,7 +294,7 @@ def validate_picks(picks: list[dict]) -> tuple[list[dict], list[dict]]:
         if not re.match(r"^\d{6}$", code):
             reasons.append(f"{code} 不是 6 位代码")
         elif not is_eligible_board(code):
-            reasons.append(f"{code} 非沪深主板/创业板（科创/B股/北交所已排除）")
+            reasons.append(f"{code} 北交所/B股（已排除）")
         if is_st(name):
             reasons.append(f"{name} 含 ST")
         # Sanity: can Tencent actually quote this code?
