@@ -204,7 +204,7 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
 
 def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
     """Prompt for DeepSeek to pick 3 stocks using its own knowledge only."""
-    return f"目前{concept_name}的龙头标的有哪些？"
+    return f"目前{concept_name}的龙头标的有哪些？注意：直接推荐技术落地的主体公司代码，如果核心业务在子公司，请推荐该子公司的股票代码而非母公司。"
 
 
 # =================================================================
