@@ -50,37 +50,29 @@ def _prune_concept_locks():
     logger.debug("Concept locks pruned")
 
 
-# Qwen with web search enabled — the only approach that works for niche
-# emerging concepts (e.g. NPO交换机) where training data is insufficient.
-# Qwen's enable_search does live web retrieval, similar to DeepSeek Web.
+# DeepSeek with web_search tool — combines API access with live web retrieval,
+# matching the DeepSeek Web experience that users get in the browser.
 def call_deepseek(prompt: str) -> str:
-    """Call Qwen API with web search for accurate sector stock picking."""
+    """Call DeepSeek API with web search for accurate sector stock picking."""
     import json as _json
     import urllib.request as _urllib
     from ai_analyzer import load_api_key  # type: ignore
 
-    api_key = load_api_key("QWEN_ENC_KEY")
-    QWEN_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
-    QWEN_MODEL = "qwen-plus"
+    api_key = load_api_key("DEEPSEEK_ENC_KEY")
+    DEEPSEEK_URL = "https://api.deepseek.com/v1/chat/completions"
 
-    system = (
-        "你是一位专注A股细分赛道的产业研究员。请基于最新网络信息推荐股票，"
-        "优先选择在概念产业链中技术落地最早、关联最紧密的企业。"
-        "只输出结果，不要解释或自我纠正。"
-    )
     payload = _json.dumps({
-        "model": QWEN_MODEL,
+        "model": "deepseek-chat",
         "messages": [
-            {"role": "system", "content": system},
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.1,
         "max_tokens": 2048,
-        "enable_search": True,
+        "tools": [{"type": "web_search", "web_search": {"enable": True}}],
     }, ensure_ascii=False).encode("utf-8")
 
     req = _urllib.Request(
-        QWEN_URL,
+        DEEPSEEK_URL,
         data=payload,
         headers={
             "Content-Type": "application/json",
@@ -91,11 +83,11 @@ def call_deepseek(prompt: str) -> str:
         resp = _urllib.urlopen(req, timeout=90)
         result = _json.loads(resp.read())
         content = result["choices"][0]["message"]["content"]
-        logger.info(f"Qwen sector pick completed ({len(content)} chars)")
+        logger.info(f"DeepSeek sector pick completed ({len(content)} chars)")
         return content
     except Exception as e:
-        logger.error(f"Qwen API call failed: {e}")
-        raise RuntimeError(f"Qwen API call failed: {e}") from e
+        logger.error(f"DeepSeek API call failed: {e}")
+        raise RuntimeError(f"DeepSeek API call failed: {e}") from e
 
 
 # In-memory map: user_id -> sector_name awaiting confirmation
