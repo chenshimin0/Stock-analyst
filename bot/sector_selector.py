@@ -204,15 +204,7 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
 
 def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
     """Prompt for DeepSeek to pick 3 stocks using its own knowledge only."""
-    return f"""目前{concept_name}的龙头标的有哪些？请推荐 3 只最核心的A股股票。
-
-要求：排除北交所（8开头）、B股（4/9开头），排除 ST 股票。
-
-请严格按以下 JSON 格式输出（不要任何其他文字）：
-{{"picks":[
-  {{"code":"6位代码","name":"股票简称","reason":"一句话说明该公司在{concept_name}中的核心地位"}}
-]}}
-必须恰好 3 只。"""
+    return f"目前{concept_name}的龙头标的有哪些？"
 
 
 # =================================================================
@@ -242,32 +234,66 @@ def parse_deepseek_response(raw: str) -> dict:
       {"picks": [{"code","name","reason"}, ...]} on success
       {"error": "..."} on missing/empty/error
     """
-    # Strip markdown code fences
     text = raw.strip()
-    text = re.sub(r"^```(?:json)?\s*", "", text)
-    text = re.sub(r"\s*```$", "", text)
-    # Find first { ... } block
-    m = re.search(r"\{.*\}", text, re.DOTALL)
-    if not m:
-        return {"error": "no JSON object found in response"}
-    try:
-        data = json.loads(m.group(0))
-    except json.JSONDecodeError as e:
-        return {"error": f"JSON parse error: {e}"}
-    if "error" in data:
-        return {"error": data["error"]}
-    picks = data.get("picks")
-    if not isinstance(picks, list) or len(picks) != 3:
-        return {"error": f"expected 3 picks, got {len(picks) if isinstance(picks, list) else 'non-list'}"}
-    for p in picks:
-        if not all(k in p for k in ("code", "name", "reason")):
-            return {"error": f"missing field in pick: {p}"}
-        if not re.match(r"^\d{6}$", p["code"]):
-            return {"error": f"invalid code: {p['code']}"}
-        # Reject picks where DeepSeek admits the stock is wrong/irrelevant
-        if _is_self_negating(p.get("reason", "")):
-            return {"error": f"self-negating reason in pick {p['code']} {p['name']}: {p['reason'][:80]}..."}
-    return {"picks": picks}
+
+    # ---- Try JSON first ----
+    json_text = re.sub(r"^```(?:json)?\s*", "", text)
+    json_text = re.sub(r"\s*```$", "", json_text)
+    m = re.search(r"\{.*\}", json_text, re.DOTALL)
+    if m:
+        try:
+            data = json.loads(m.group(0))
+            if "picks" in data and isinstance(data["picks"], list):
+                picks = data["picks"]
+                for p in picks:
+                    if not all(k in p for k in ("code", "name", "reason")):
+                        raise ValueError("missing field")
+                    if not re.match(r"^\d{6}$", p["code"]):
+                        raise ValueError(f"invalid code: {p['code']}")
+                    if _is_self_negating(p.get("reason", "")):
+                        raise ValueError(f"self-negating reason: {p['reason'][:80]}")
+                if len(picks) >= 3:
+                    return {"picks": picks[:3]}
+        except (json.JSONDecodeError, ValueError, KeyError):
+            pass  # fall through to natural language parsing
+
+    # ---- Natural language parsing ----
+    # Extract patterns like:
+    #   1. **锐捷网络（301165）**
+    #   锐捷网络（301165）
+    #   - 301165 锐捷网络
+    # Find all stock codes with surrounding context
+    picks = []
+    seen_codes = set()
+
+    # Pattern: 股票名（6位代码）or （6位代码）股票名
+    for match in re.finditer(
+        r'(?:^|\n|\d+[.、．]\s*)\**\s*'
+        r'(.+?)\s*[（(](\d{6})[）)]',
+        text
+    ):
+        name = re.sub(r'[\*\_\[\]]', '', match.group(1)).strip()
+        code = match.group(2)
+        if code in seen_codes or len(picks) >= 3:
+            continue
+        if not name or len(name) > 20:
+            continue
+        # Extract reason from following text (up to 80 chars)
+        end_pos = match.end()
+        reason_text = text[end_pos:end_pos + 120]
+        reason_match = re.match(r'[^。\n]*(?:。|$)', reason_text)
+        reason = reason_match.group(0).strip() if reason_match else ""
+        reason = re.sub(r'^[：:，,、\s]+', '', reason)
+        reason = re.sub(r'\*+', '', reason)
+        if not reason:
+            reason = f"{name}是核心标的"
+        seen_codes.add(code)
+        picks.append({"code": code, "name": name, "reason": reason[:80]})
+
+    if len(picks) >= 3:
+        return {"picks": picks[:3]}
+
+    return {"error": f"无法从回复中提取 3 只股票。回复摘要: {text[:200]}"}
 
 
 # =================================================================

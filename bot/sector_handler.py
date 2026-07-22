@@ -50,10 +50,11 @@ def _prune_concept_locks():
     logger.debug("Concept locks pruned")
 
 
-# DeepSeek with web_search tool — combines API access with live web retrieval,
-# matching the DeepSeek Web experience that users get in the browser.
+# DeepSeek-chat with real web search results as prompt context.
+# The sector_selector now runs DuckDuckGo search and feeds results
+# into the prompt, so the model has current web data to work from.
 def call_deepseek(prompt: str) -> str:
-    """Call DeepSeek API with web search for accurate sector stock picking."""
+    """Call DeepSeek API for sector stock picking."""
     import json as _json
     import urllib.request as _urllib
     from ai_analyzer import load_api_key  # type: ignore
@@ -68,7 +69,6 @@ def call_deepseek(prompt: str) -> str:
         ],
         "temperature": 0.1,
         "max_tokens": 2048,
-        "tools": [{"type": "web_search", "web_search": {"enable": True}}],
     }, ensure_ascii=False).encode("utf-8")
 
     req = _urllib.Request(
