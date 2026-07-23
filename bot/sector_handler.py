@@ -50,19 +50,23 @@ def _prune_concept_locks():
     logger.debug("Concept locks pruned")
 
 
-# DeepSeek-chat with real web search results as prompt context.
-# The sector_selector now runs DuckDuckGo search and feeds results
-# into the prompt, so the model has current web data to work from.
 def call_deepseek(prompt: str) -> str:
-    """Call Qwen API (with web search) for sector stock picking."""
+    """Call Doubao API (with web search) for sector stock picking."""
     import json as _json
+    import os as _os
     import urllib.request as _urllib
-    from ai_analyzer import load_api_key, QWEN_URL  # type: ignore
+    from crypto_utils import decrypt  # type: ignore
 
-    api_key = load_api_key("QWEN_ENC_KEY")
+    # Load Doubao API key from encrypted file
+    _enc_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "doubao.enc")
+    _passphrase = _os.getenv("SECRET_PASSPHRASE", "wwFblXr9ZyaobfcjNoZhApJZZqUs52+3")
+    with open(_enc_path, "r") as _f:
+        api_key = decrypt(_f.read().strip(), _passphrase)
+
+    DOUBAO_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
 
     payload = _json.dumps({
-        "model": "qwen-plus",
+        "model": "doubao-seed-1-6-251015",
         "messages": [
             {"role": "user", "content": prompt},
         ],
@@ -72,7 +76,7 @@ def call_deepseek(prompt: str) -> str:
     }, ensure_ascii=False).encode("utf-8")
 
     req = _urllib.Request(
-        QWEN_URL,
+        DOUBAO_URL,
         data=payload,
         headers={
             "Content-Type": "application/json",
@@ -83,11 +87,11 @@ def call_deepseek(prompt: str) -> str:
         resp = _urllib.urlopen(req, timeout=90)
         result = _json.loads(resp.read())
         content = result["choices"][0]["message"]["content"]
-        logger.info(f"Qwen sector pick completed ({len(content)} chars)")
+        logger.info(f"Doubao sector pick completed ({len(content)} chars)")
         return content
     except Exception as e:
-        logger.error(f"Qwen API call failed: {e}")
-        raise RuntimeError(f"Qwen API call failed: {e}") from e
+        logger.error(f"Doubao API call failed: {e}")
+        raise RuntimeError(f"Doubao API call failed: {e}") from e
 
 
 # In-memory map: user_id -> sector_name awaiting confirmation
