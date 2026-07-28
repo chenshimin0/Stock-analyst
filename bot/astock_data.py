@@ -290,10 +290,22 @@ def get_pywencai_stock_data(code: str, use_cache: bool = True) -> dict:
     except Exception:
         pass
 
+    # Load browser cookie to bypass broken hexin-v token (403 Access Denied)
+    _iwc_cookie = None
+    try:
+        _cookie_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), ".iwc_cookie")
+        if os.path.exists(_cookie_path):
+            with open(_cookie_path, "r") as _cf:
+                _iwc_cookie = _cf.read().strip().replace("\n", " ")
+            if _iwc_cookie:
+                logger.debug("Loaded iwc cookie for pywencai (%d chars)", len(_iwc_cookie))
+    except Exception:
+        pass
+
     last_err = None
     for attempt in range(3):
         try:
-            result = pywencai.get(query=code)
+            result = pywencai.get(query=code, cookie=_iwc_cookie)
             if isinstance(result, dict):
                 _pywencai_cache[code] = result
                 logger.info(f"pywencai stock data for {code}: {list(result.keys())}")
@@ -401,49 +413,75 @@ def _fund_flow_from_pywencai(code: str, days: int = 30) -> list:
 def get_fund_flow_recent(code: str, days: int = 8) -> list:
     """Get individual stock fund flow for recent N trading days.
 
-    Primary source: pywencai stock query 历史主力资金流向 (matches 10jqka).
-    Enriches with:
-    - change_pct from Tencent K-line (historical days)
-    - change_pct from pywencai kline2 for latest day (fallback)
+    Primary source: EastMoney push2 API (no cookie/hexin-v needed).
+    Falls back to akshare.
+    Enriches with change_pct from Tencent quote.
 
     Returns list of {date, main_net, main_pct, super_large_net, large_net,
-                     medium_net, retail_net, change_pct, close} dicts
+                     medium_net, retail_net, change_pct} dicts
     (most recent first), or [] on failure.
     """
-    # Step 1: pywencai as primary source (30 days of fund flow data)
-    fund_data = _fund_flow_from_pywencai(code, days=max(days, 30))
+    # Step 1: Try EastMoney API first
+    secid = f"1.{code}" if code.startswith("6") else f"0.{code}"
+    url = (
+        f"https://push2his.eastmoney.com/api/qt/stock/fflow/daykline/get?"
+        f"lmt={days + 5}&klt=1&secid={secid}&fields1=f1,f2,f3,f7&fields2="
+        f"f51,f52,f53,f54,f55,f56,f57,f58,f59,f60,f61,f62,f63,f64,f65"
+    )
+    try:
+        import ssl as _ssl
+        _ctx = _ssl.create_default_context()
+        _ctx.check_hostname = False
+        _ctx.verify_mode = _ssl.CERT_NONE
+        req = urllib.request.Request(url, headers={"Referer": "https://quote.eastmoney.com/"})
+        resp = urllib.request.urlopen(req, timeout=10, context=_ctx)
+        data = json.loads(resp.read())
+        klines = data.get("data", {}).get("klines", [])
+        fund_data = []
+        for line in klines[-days:]:
+            parts = line.split(",")
+            if len(parts) < 7:
+                continue
+            # EastMoney fields: date, main_net(元), retail_net, medium_net,
+            # large_net, super_large_net, main_pct(%), ..., close, change_pct(%)
+            fund_data.append({
+                "date": parts[0],
+                "main_net": float(parts[1]) if parts[1] != "-" else 0,
+                "main_pct": float(parts[6]) if len(parts) > 6 and parts[6] != "-" else 0,
+                "super_large_net": float(parts[5]) if len(parts) > 5 and parts[5] != "-" else 0,
+                "large_net": float(parts[4]) if len(parts) > 4 and parts[4] != "-" else 0,
+                "medium_net": float(parts[3]) if len(parts) > 3 and parts[3] != "-" else 0,
+                "retail_net": float(parts[2]) if len(parts) > 2 and parts[2] != "-" else 0,
+                "change_pct": float(parts[12]) if len(parts) > 12 and parts[12] != "-" else 0,
+                "close": float(parts[11]) if len(parts) > 11 and parts[11] != "-" else 0,
+            })
+        if fund_data:
+            logger.info(f"Fund flow for {code}: {len(fund_data)} days (EastMoney)")
+            return list(reversed(fund_data))
+    except Exception as e:
+        logger.debug(f"EastMoney fund flow failed for {code}: {e}")
 
-    # Step 2: Enrich with change_pct from Tencent K-line (前复权)
+    # Step 2: Fallback to akshare
+    fund_data = _fund_flow_from_akshare(code, days=days)
     if fund_data:
-        _enrich_change_pct(code, fund_data)
+        logger.info(f"Fund flow for {code}: {len(fund_data)} days (akshare)")
+        # Enrich latest day with real-time change_pct from Tencent
+        try:
+            prefix = "sh" if code.startswith(("6", "9")) else "sz"
+            turl = f"http://qt.gtimg.cn/q={prefix}{code}"
+            treq = urllib.request.Request(turl, headers={"User-Agent": UA})
+            tresp = urllib.request.urlopen(treq, timeout=8)
+            raw = tresp.read().decode("gbk", errors="replace")
+            tparts = raw.split("~")
+            if len(tparts) > 32:
+                chg = float(tparts[32]) if tparts[32] else 0.0
+                if chg != 0:
+                    fund_data[-1]["change_pct"] = chg
+        except Exception:
+            pass
+        return fund_data
 
-    # Step 3: Fallback — if latest day still has change_pct=0, try Tencent realtime
-    if fund_data:
-        # fund_data is chronologically sorted (oldest first from _fund_flow_from_pywencai)
-        latest_entry = fund_data[-1]  # last = most recent date
-        if latest_entry.get("change_pct", 0) == 0:
-            try:
-                prefix = "sh" if code.startswith(("6", "9")) else "sz"
-                url = f"http://qt.gtimg.cn/q={prefix}{code}"
-                req = urllib.request.Request(url, headers={"User-Agent": UA})
-                resp = urllib.request.urlopen(req, timeout=8)
-                raw = resp.read().decode("gbk", errors="replace")
-                parts = raw.split("~")
-                if len(parts) > 32:
-                    chg = float(parts[32]) if parts[32] else 0.0
-                    if chg != 0:
-                        latest_entry["change_pct"] = chg
-            except Exception:
-                pass
-
-    # Step 4: Sort by date descending (most recent first) and take top N
-    result = sorted(fund_data, key=lambda x: x["date"], reverse=True)[:days]
-
-    if result:
-        logger.info(f"Fund flow for {code}: {len(result)} days (pywencai)")
-        return result
-
-    logger.warning(f"Fund flow recent failed for {code}: pywencai returned no data")
+    logger.warning(f"Fund flow recent failed for {code}: all sources returned no data")
     return []
 
 

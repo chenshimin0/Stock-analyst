@@ -204,7 +204,10 @@ def build_concept_candidate_pool(sector_name: str, db_session, max_candidates: i
 
 def build_prompt_ai_knowledge(concept_name: str, candidates=None) -> str:
     """Prompt for AI to pick 3 stocks using its own knowledge only."""
-    return f"目前{concept_name}的龙头标的有哪些？注意：直接推荐技术落地的主体公司代码，如果核心业务在子公司，请推荐该子公司的股票代码而非母公司。"
+    return (
+        f'请联网搜索”{concept_name}概念股”或”{concept_name}龙头股”，'
+        f'然后回答：{concept_name}板块的龙头标的有哪些？推荐3只上市公司。排除北交所'
+    )
 
 
 # =================================================================
@@ -257,27 +260,27 @@ def parse_deepseek_response(raw: str) -> dict:
         except (json.JSONDecodeError, ValueError, KeyError):
             pass  # fall through to natural language parsing
 
-    # ---- Natural language parsing ----
-    # Extract patterns like:
-    #   1. **锐捷网络（301165）**
-    #   锐捷网络（301165）
-    #   - 301165 锐捷网络
-    # Find all stock codes with surrounding context
+
     picks = []
     seen_codes = set()
 
-    # Pattern: 股票名（6位代码）or （6位代码）股票名
+    # Pattern: find 6-digit stock codes with surrounding context.
+    # Handle both "公司名（代码）" and "公司名（描述文字代码）" formats.
     for match in re.finditer(
         r'(?:^|\n|\d+[.、．]\s*)\**\s*'
-        r'(.+?)\s*[（(](\d{6})[）)]',
+        r'(.+?)\s*[（(].*?(\d{6})[）)]',
         text
     ):
         name = re.sub(r'[\*\_\[\]]', '', match.group(1)).strip()
         code = match.group(2)
         if code in seen_codes or len(picks) >= 3:
             continue
-        if not name or len(name) > 20:
+        if not name or len(name) > 30:
             continue
+        # Verify name against live quote — AI may return subsidiary name with parent code
+        q = get_quote(code)
+        if q and q.get("name"):
+            name = q["name"]
         # Extract reason from following text (up to 80 chars)
         end_pos = match.end()
         reason_text = text[end_pos:end_pos + 120]
@@ -363,6 +366,7 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
                 "\n请重新推荐 3 只合规股票。"
         prompt = build_prompt_ai_knowledge(concept_name) + rejected_note
         raw = deepseek_callable(prompt)
+        logger.info(f"[DEBUG] Raw AI response ({len(raw)} chars): {raw[:500]}")
         parsed = parse_deepseek_response(raw)
         if "picks" not in parsed:
             break
@@ -372,30 +376,27 @@ def select_stocks_for_concept(concept_name: str, db_session, deepseek_callable) 
         rejected_codes = [p["code"] for p in rejected]
         rejected_reasons = ["; ".join(p.get("reject_reasons", [])) for p in rejected]
 
-        # Concept relevance check: each pick's reason must mention the
-        # concept name. Normalize by stripping all whitespace from both
-        # the concept and the reason so that "npo 交换机" (with space in
-        # reason) still matches the keyword "npo交换机" (no space).
+        # Concept relevance check: verify the FULL AI response mentions the
+        # concept name (not each individual pick reason, which may describe
+        # the company without restating the concept).
         concept_keywords = [w for w in re.split(r'[\s\d]+', concept_name.lower()) if len(w) >= 2]
         if concept_keywords:
-            # Build space-stripped versions for robust matching
             keywords_nospace = [re.sub(r'\s+', '', kw) for kw in concept_keywords]
-            relevant = []
-            for p in valid:
-                reason_lower = p.get("reason", "").lower()
-                reason_nospace = re.sub(r'\s+', '', reason_lower)
-                if any(kw in reason_lower or kw_ns in reason_nospace
-                       for kw, kw_ns in zip(concept_keywords, keywords_nospace)):
-                    relevant.append(p)
-                else:
+            raw_lower = raw.lower()
+            raw_nospace = re.sub(r'\s+', '', raw_lower)
+            raw_mentions = any(kw in raw_lower or kw_ns in raw_nospace
+                              for kw, kw_ns in zip(concept_keywords, keywords_nospace))
+            if not raw_mentions:
+                # Entire response doesn't mention the concept — reject all
+                for p in valid:
                     logger.warning(
                         f"Rejected {p['code']} {p['name']} for '{concept_name}': "
-                        f"reason doesn't mention concept keywords {concept_keywords}"
+                        f"full response doesn't mention concept keywords {concept_keywords}"
                     )
                     rejected.append({**p, "reject_reasons": [
-                        f"选股理由未提及概念关键词 {concept_keywords}，疑似为其他概念的推荐"
+                        f"全文未提及概念关键词 {concept_keywords}，疑似为其他概念的推荐"
                     ]})
-            valid = relevant
+                valid = []
 
         rejected_codes = [p["code"] for p in rejected]
         rejected_reasons = ["; ".join(p.get("reject_reasons", [])) for p in rejected]

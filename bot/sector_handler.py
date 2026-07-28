@@ -51,32 +51,32 @@ def _prune_concept_locks():
 
 
 def call_deepseek(prompt: str) -> str:
-    """Call Doubao API (with web search) for sector stock picking."""
+    """Call Qwen API (with web search + thinking) for sector stock picking."""
     import json as _json
     import os as _os
     import urllib.request as _urllib
     from crypto_utils import decrypt  # type: ignore
 
-    # Load Doubao API key from encrypted file
-    _enc_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "doubao.enc")
+    # Load Qwen API key from encrypted file (skip load_api_key to avoid deepseek.enc fallback bug)
+    _enc_path = _os.path.join(_os.path.dirname(_os.path.abspath(__file__)), "qwen.enc")
     _passphrase = _os.getenv("SECRET_PASSPHRASE", "wwFblXr9ZyaobfcjNoZhApJZZqUs52+3")
     with open(_enc_path, "r") as _f:
         api_key = decrypt(_f.read().strip(), _passphrase)
 
-    DOUBAO_URL = "https://ark.cn-beijing.volces.com/api/v3/chat/completions"
+    QWEN_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions"
 
     payload = _json.dumps({
-        "model": "doubao-seed-1-6-251015",
+        "model": "qwen-max",
         "messages": [
             {"role": "user", "content": prompt},
         ],
         "temperature": 0.1,
-        "max_tokens": 2048,
+        "max_tokens": 4096,
         "enable_search": True,
     }, ensure_ascii=False).encode("utf-8")
 
     req = _urllib.Request(
-        DOUBAO_URL,
+        QWEN_URL,
         data=payload,
         headers={
             "Content-Type": "application/json",
@@ -84,14 +84,18 @@ def call_deepseek(prompt: str) -> str:
         },
     )
     try:
-        resp = _urllib.urlopen(req, timeout=90)
+        resp = _urllib.urlopen(req, timeout=120)
         result = _json.loads(resp.read())
         content = result["choices"][0]["message"]["content"]
-        logger.info(f"Doubao sector pick completed ({len(content)} chars)")
+        logger.info(f"Qwen sector pick completed ({len(content)} chars)")
         return content
     except Exception as e:
-        logger.error(f"Doubao API call failed: {e}")
-        raise RuntimeError(f"Doubao API call failed: {e}") from e
+        try:
+            err_body = e.read().decode()[:500] if hasattr(e, 'read') else str(e)
+        except Exception:
+            err_body = str(e)
+        logger.error(f"Qwen API call failed: {err_body}")
+        raise RuntimeError(f"Qwen API call failed: {err_body}") from e
 
 
 # In-memory map: user_id -> sector_name awaiting confirmation
