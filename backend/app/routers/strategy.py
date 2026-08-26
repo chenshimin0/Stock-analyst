@@ -43,18 +43,31 @@ def _to_stock_metric(s: StrategyPickStock) -> StrategyStockMetric:
 
 @router.get("", response_model=PaginatedStrategyPicks)
 def list_strategy_picks(
-    status: Optional[str] = Query(None, pattern="^(in_progress|completed|archived)$"),
+    status: Optional[str] = Query(None),
     strategy_id: Optional[int] = Query(None, ge=1),
+    search: Optional[str] = Query(None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     db: Session = Depends(get_db),
 ):
-    """List strategy picks. Filter by status and/or strategy_id. Paginated."""
+    """List strategy picks. Filter by status, strategy_id and/or stock search. Paginated."""
     q = db.query(StrategyPick)
     if status:
-        q = q.filter(StrategyPick.status == status)
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        valid = {"in_progress", "completed", "archived"}
+        statuses = [s for s in statuses if s in valid]
+        if statuses:
+            q = q.filter(StrategyPick.status.in_(statuses))
     if strategy_id is not None:
         q = q.filter(StrategyPick.strategy_id == strategy_id)
+
+    term = search.strip() if search else ""
+    if term:
+        like = f"%{term}%"
+        q = q.join(StrategyPick.stocks).filter(
+            (StrategyPickStock.stock_code.ilike(like)) |
+            (StrategyPickStock.stock_name.ilike(like))
+        ).distinct()
 
     total = q.count()
     picks = q.order_by(StrategyPick.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
@@ -65,9 +78,15 @@ def list_strategy_picks(
         s.id: s for s in db.query(Strategy).filter(Strategy.id.in_(strat_ids)).all()
     } if strat_ids else {}
 
+    term_lower = term.lower()
+    def _matches(s):
+        return (term_lower in (s.stock_code or "").lower()) or (term_lower in (s.stock_name or "").lower())
+
     items = []
     for p in picks:
         s_def = strat_map.get(p.strategy_id)
+        # When searching, surface matching stocks first in the preview
+        stocks = sorted(p.stocks, key=lambda s: (0 if _matches(s) else 1, s.id)) if term else p.stocks
         items.append(StrategyPickListItem(
             id=p.id,
             strategy_id=p.strategy_id,
@@ -77,7 +96,7 @@ def list_strategy_picks(
             completed_at=p.completed_at,
             query_text=s_def.query_text if s_def else "",
             strategy_name=s_def.name if s_def else f"#{p.strategy_id}",
-            stocks_preview=[_to_stock_metric(s) for s in p.stocks[:PREVIEW_LIMIT]],
+            stocks_preview=[_to_stock_metric(s) for s in stocks[:PREVIEW_LIMIT]],
             avg_t1_pct=_avg(p.stocks, "t1_pct"),
             avg_t3_pct=_avg(p.stocks, "t3_pct"),
             avg_t7_pct=_avg(p.stocks, "t7_pct"),
@@ -85,6 +104,51 @@ def list_strategy_picks(
             avg_t30_pct=_avg(p.stocks, "t30_pct"),
         ))
     return PaginatedStrategyPicks(items=items, total=total, page=page, page_size=page_size)
+
+
+@router.get("/export")
+def export_strategy_picks(
+    status: Optional[str] = Query(None),
+    strategy_id: Optional[int] = Query(None, ge=1),
+    db: Session = Depends(get_db),
+):
+    """Export all matching picks' stock rows as a flat list (no pagination)."""
+    q = db.query(StrategyPick)
+    if status:
+        statuses = [s.strip() for s in status.split(",") if s.strip()]
+        valid = {"in_progress", "completed", "archived"}
+        statuses = [s for s in statuses if s in valid]
+        if statuses:
+            q = q.filter(StrategyPick.status.in_(statuses))
+    if strategy_id is not None:
+        q = q.filter(StrategyPick.strategy_id == strategy_id)
+
+    picks = q.order_by(StrategyPick.created_at.desc()).all()
+    strat_ids = {p.strategy_id for p in picks}
+    strat_map = {s.id: s for s in db.query(Strategy).filter(Strategy.id.in_(strat_ids)).all()} if strat_ids else {}
+
+    rows = []
+    for p in picks:
+        s_def = strat_map.get(p.strategy_id)
+        s_name = s_def.name if s_def else f"#{p.strategy_id}"
+        created = p.created_at.strftime("%Y-%m-%d") if p.created_at else ""
+        for s in p.stocks:
+            rows.append({
+                "pick_id": p.id,
+                "strategy_name": s_name,
+                "created_at": created,
+                "stock_code": s.stock_code,
+                "stock_name": s.stock_name,
+                "industry": s.industry or "",
+                "business_summary": s.business_summary or "",
+                "t0_price": s.t0_price,
+                "t1_pct": s.t1_pct, "t1_date": s.t1_date,
+                "t3_pct": s.t3_pct, "t3_date": s.t3_date,
+                "t7_pct": s.t7_pct, "t7_date": s.t7_date,
+                "t15_pct": s.t15_pct, "t15_date": s.t15_date,
+                "t30_pct": s.t30_pct, "t30_date": s.t30_date,
+            })
+    return rows
 
 
 @router.get("/{pick_id}", response_model=StrategyPickDetail)

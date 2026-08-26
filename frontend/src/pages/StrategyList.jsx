@@ -1,7 +1,8 @@
 import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
-import { listStrategyPicks, deleteStrategyPick, deleteStockRow } from '../api/strategy.js';
+import { listStrategyPicks, exportStrategyPicks, deleteStrategyPick, deleteStockRow } from '../api/strategy.js';
 import { listStrategies } from '../api/strategies.js';
+import { downloadAllPicksCsv } from '../utils/csv.js';
 
 const TABS = [
   { key: 'active', label: '进行中', statuses: ['in_progress', 'completed'] },
@@ -21,7 +22,14 @@ export default function StrategyList() {
   const [selectedStrategy, setSelectedStrategy] = useState(filterStrategyId ? String(filterStrategyId) : '');
   const [selectedDate, setSelectedDate] = useState('');
   const [stockFilter, setStockFilter] = useState('');
+  const [searchTerm, setSearchTerm] = useState('');
   const pageSize = 10;
+
+  // Debounce stock search -> server-side search
+  useEffect(() => {
+    const t = setTimeout(() => setSearchTerm(stockFilter.trim()), 350);
+    return () => clearTimeout(t);
+  }, [stockFilter]);
 
   // Pagination
   const [page, setPage] = useState(1);
@@ -32,30 +40,37 @@ export default function StrategyList() {
     setLoading(true);
     setErr(null);
     const statuses = TABS.find(t => t.key === tab).statuses;
-    const params = { page, page_size: pageSize };
+    const statusParam = statuses.join(',');
+    const params = { status: statusParam, page, page_size: pageSize };
     if (selectedStrategy) params.strategy_id = Number(selectedStrategy);
+    if (searchTerm) params.search = searchTerm;
 
-    const pickPromises = statuses.map(s => listStrategyPicks(s, params).catch(() => ({ items: [], total: 0 })));
-    Promise.all([...pickPromises, listStrategies().catch(() => [])])
-      .then((results) => {
-        const strats = results.pop();
-        const allResults = results;
-        // Merge results from multiple statuses
-        const items = allResults.flatMap(r => r.items)
-          .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
-        const total = allResults.reduce((sum, r) => sum + r.total, 0);
-        setPicks(items);
-        setTotalItems(total);
+    Promise.all([listStrategyPicks(params).catch(() => ({ items: [], total: 0 })), listStrategies().catch(() => [])])
+      .then(([result, strats]) => {
+        setPicks(result.items);
+        setTotalItems(result.total);
         setStrategies(strats);
       })
       .catch(e => setErr(String(e)))
       .finally(() => setLoading(false));
-  }, [tab, selectedStrategy, page]);
+  }, [tab, selectedStrategy, page, searchTerm]);
 
   useEffect(load, [load]);
 
-  // Reset page when tab or strategy changes
-  useEffect(() => { setPage(1); }, [tab, selectedStrategy]);
+  const handleExportAll = async () => {
+    try {
+      const statuses = TABS.find(t => t.key === tab).statuses;
+      const params = { status: statuses.join(',') };
+      if (selectedStrategy) params.strategy_id = Number(selectedStrategy);
+      const rows = await exportStrategyPicks(params);
+      downloadAllPicksCsv(rows);
+    } catch (e) {
+      alert('下载失败：' + e.message);
+    }
+  };
+
+  // Reset page when tab, strategy or search changes
+  useEffect(() => { setPage(1); }, [tab, selectedStrategy, searchTerm]);
 
   // Set initial strategy from URL param
   useEffect(() => {
@@ -70,24 +85,14 @@ export default function StrategyList() {
     }))].sort().reverse();
   }, [picks]);
 
-  // Filtered picks (date + stock are client-side, strategy is server-side)
+  // Filtered picks (date is client-side; strategy + stock search are server-side)
   const filteredPicks = useMemo(() => {
+    if (!selectedDate) return picks;
     return picks.filter(p => {
-      if (selectedDate) {
-        const d = new Date(p.created_at).toISOString().split('T')[0];
-        if (d !== selectedDate) return false;
-      }
-      if (stockFilter.trim()) {
-        const q = stockFilter.trim().toLowerCase();
-        const stocks = p.stocks_preview || [];
-        return stocks.some(s =>
-          s.stock_code.toLowerCase().includes(q) ||
-          s.stock_name.toLowerCase().includes(q)
-        );
-      }
-      return true;
+      const d = new Date(p.created_at).toISOString().split('T')[0];
+      return d === selectedDate;
     });
-  }, [picks, selectedDate, stockFilter]);
+  }, [picks, selectedDate]);
 
   const strategyName = (id, name) => name || strategies.find(s => s.id === id)?.name || `#${id}`;
 
@@ -173,6 +178,20 @@ export default function StrategyList() {
             清除
           </button>
         )}
+
+        <div style={{ flex: 1 }} />
+
+        <button
+          onClick={handleExportAll}
+          title="下载当前筛选下所有批次的全部数据"
+          style={{
+            padding: '6px 16px', background: '#1565c0', color: '#fff',
+            border: 'none', borderRadius: 4, cursor: 'pointer',
+            fontSize: 13, fontWeight: 600,
+          }}
+        >
+          ⬇️ 下载全部数据
+        </button>
       </div>
 
       {loading && <div>加载中…</div>}
@@ -180,7 +199,7 @@ export default function StrategyList() {
 
       {!loading && filteredPicks.length === 0 && (
         <div style={{ color: '#888', padding: 24, textAlign: 'center' }}>
-          {selectedStrategy || selectedDate
+          {selectedStrategy || selectedDate || searchTerm
             ? '没有匹配的批次。尝试清除筛选条件。'
             : tab === 'active'
               ? '还没有策略批次。每天 14:30 自动跑 iwencai 选股，结果会出现在这里。'
@@ -217,6 +236,25 @@ export default function StrategyList() {
               <span style={{ fontSize: 13, color: '#666' }}>
                 {page} / {totalPages}
               </span>
+              <input
+                type="number"
+                min={1}
+                max={totalPages}
+                defaultValue={page}
+                key={page}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    const v = parseInt(e.target.value, 10);
+                    if (v >= 1 && v <= totalPages) setPage(v);
+                  }
+                }}
+                style={{
+                  width: 52, padding: '4px 6px', border: '1px solid #555',
+                  borderRadius: 4, fontSize: 12, textAlign: 'center',
+                  background: '#1e293b', color: '#e5e7eb',
+                }}
+                title="输入页数后按回车跳转"
+              />
               <button
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                 disabled={page >= totalPages}
