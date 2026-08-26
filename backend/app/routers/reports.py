@@ -18,6 +18,25 @@ import re
 router = APIRouter(prefix="/reports", tags=["reports"])
 
 
+def _bg_refresh_fund_flow(report_id: int):
+    """Background task: refresh fund flow data without blocking the page load."""
+    import threading
+    from app.database import SessionLocal
+
+    def _run():
+        db = SessionLocal()
+        try:
+            report = db.query(Report).filter(Report.id == report_id).first()
+            if report:
+                ReportService.refresh_fund_flow_if_stale(db, report)
+        except Exception:
+            pass
+        finally:
+            db.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+
 def _markdown_to_html(text: str) -> str:
     """Convert basic Markdown to HTML for report rendering."""
     if not text:
@@ -132,9 +151,9 @@ async def get_report(
     if report_id.isdigit() and len(report_id) <= 4:
         report = db.query(Report).filter(Report.id == int(report_id)).first()
         if report:
-            # Lazy-refresh fund flow + limit-up data on every view
-            ReportService.refresh_fund_flow_if_stale(db, report)
             data = await ReportService.get_report_with_realtime(db, report.id)
+            # Fire-and-forget: refresh fund flow in background thread, don't block page load
+            _bg_refresh_fund_flow(report.id)
     if not data:
         report = (
             db.query(Report)
@@ -143,8 +162,8 @@ async def get_report(
             .first()
         )
         if report:
-            ReportService.refresh_fund_flow_if_stale(db, report)
             data = await ReportService.get_report_with_realtime(db, report.id)
+            _bg_refresh_fund_flow(report.id)
     if not data:
         raise HTTPException(status_code=404, detail="Report not found")
 
