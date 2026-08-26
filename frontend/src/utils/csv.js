@@ -3,10 +3,9 @@ function csvCell(v) {
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 
-function fmtPct(pct, date) {
+function fmtPct(pct) {
   if (pct == null) return '—';
-  const p = (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
-  return date ? `${p}(${date})` : p;
+  return (pct > 0 ? '+' : '') + pct.toFixed(2) + '%';
 }
 
 function toNum(v) {
@@ -69,11 +68,11 @@ export function downloadAllPicksCsv(rows) {
       r.industry || '',
       (r.business_summary || '').replace(/[\r\n]+/g, ' '),
       r.t0_price != null ? r.t0_price.toFixed(2) : '',
-      fmtPct(r.t1_pct, r.t1_date),
-      fmtPct(r.t3_pct, r.t3_date),
-      fmtPct(r.t7_pct, r.t7_date),
-      fmtPct(r.t15_pct, r.t15_date),
-      fmtPct(r.t30_pct, r.t30_date),
+      fmtPct(r.t1_pct),
+      fmtPct(r.t3_pct),
+      fmtPct(r.t7_pct),
+      fmtPct(r.t15_pct),
+      fmtPct(r.t30_pct),
     ]);
   }
 
