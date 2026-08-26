@@ -2,7 +2,7 @@ import { useEffect, useState, useMemo, useCallback } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { listStrategyPicks, exportStrategyPicks, deleteStrategyPick, deleteStockRow } from '../api/strategy.js';
 import { listStrategies } from '../api/strategies.js';
-import { downloadAllPicksCsv } from '../utils/csv.js';
+import { downloadAnalysisXlsx } from '../utils/exportAnalysis.js';
 
 const TABS = [
   { key: 'active', label: '进行中', statuses: ['in_progress', 'completed'] },
@@ -63,7 +63,7 @@ export default function StrategyList() {
       const params = { status: statuses.join(',') };
       if (selectedStrategy) params.strategy_id = Number(selectedStrategy);
       const rows = await exportStrategyPicks(params);
-      downloadAllPicksCsv(rows);
+      downloadAnalysisXlsx(rows);
     } catch (e) {
       alert('下载失败：' + e.message);
     }
@@ -183,14 +183,14 @@ export default function StrategyList() {
 
         <button
           onClick={handleExportAll}
-          title="下载当前筛选下所有批次的全部数据"
+          title="下载当前筛选下所有批次的分析报告（多 sheet Excel）"
           style={{
             padding: '6px 16px', background: '#1565c0', color: '#fff',
             border: 'none', borderRadius: 4, cursor: 'pointer',
             fontSize: 13, fontWeight: 600,
           }}
         >
-          ⬇️ 下载全部数据
+          ⬇️ 下载分析报告
         </button>
       </div>
 
