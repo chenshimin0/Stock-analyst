@@ -29,8 +29,15 @@ function avg(nums) {
 
 // ============ Sheet 1：原始明细 ============
 function buildDetailSheet(rows) {
+  // 按日期倒序（最新在前），同日期按批次倒序
+  const sorted = [...(rows || [])].sort((a, b) => {
+    const da = a.created_at || '';
+    const db = b.created_at || '';
+    if (da !== db) return db.localeCompare(da);
+    return (b.pick_id ?? 0) - (a.pick_id ?? 0);
+  });
   const aoa = [['批次', '策略', '日期', '代码', '名称', '行业', '主营', '选入价', ...PERIOD_LABELS]];
-  for (const r of rows || []) {
+  for (const r of sorted) {
     aoa.push([
       r.pick_id,
       r.strategy_name,
@@ -139,7 +146,7 @@ function buildWeeklySectorSheet(rows) {
   items.sort((a, b) =>
     a.week === b.week
       ? (b.overall ?? -Infinity) - (a.overall ?? -Infinity)
-      : a.week.localeCompare(b.week),
+      : b.week.localeCompare(a.week), // 周倒序：最新一周在前
   );
 
   const aoa = [['周', '板块', ...PERIOD_LABELS, '平均', '本周最高']];
