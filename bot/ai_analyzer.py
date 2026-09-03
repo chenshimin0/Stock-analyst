@@ -808,7 +808,7 @@ def call_qwen_raw(prompt: str, system: str = "You are a Chinese A-share stock an
 	"""Call Qwen API for sector stock selection."""
 	api_key = load_api_key("QWEN_ENC_KEY")
 	payload = json.dumps({
-		"model": QWEN_MODEL,
+		"model": MODEL,
 		"messages": [
 			{"role": "system", "content": system},
 			{"role": "user", "content": prompt},

@@ -10,7 +10,9 @@ Two entry points:
 
 Returns dict {ok, batch_id, hit_count, errors, message}.
 """
+import json
 import logging
+import re
 import sys
 from datetime import datetime, date as _date, timezone, timedelta
 from pathlib import Path
@@ -70,6 +72,95 @@ def _get_industry_business(code: str) -> dict:
         return {}
 
 
+# ============================================================
+# AI 推荐（吸筹策略）：每次跑出结果后，让 AI 根据当前市场热点/趋势挑一只最值得买的
+# ============================================================
+_AI_SYSTEM = (
+    "你是一位资深A股短线分析师，擅长捕捉市场热点与板块轮动趋势。"
+    "只输出一个JSON对象，不要任何解释、不要markdown围栏、不要自述。"
+)
+
+
+def _should_ai_pick(strategy: Strategy) -> bool:
+    """只有「吸筹」策略跑出结果后需要 AI 挑一只。"""
+    if not strategy:
+        return False
+    return strategy.id == 3 or "吸筹" in (strategy.name or "")
+
+
+def _ai_pick_one(strategy: Strategy, stock_rows: list[dict]) -> str | None:
+    """把候选股票基础信息喂给 AI，让它根据当前市场热点/趋势挑一只最值得买的。
+
+    返回被挑中的 6 位股票代码；AI 失败/未推荐/推荐不在候选中 -> None
+    （静默跳过标记，绝不影响选股落库）。
+    """
+    if not stock_rows:
+        return None
+
+    lines = []
+    for s in stock_rows:
+        parts = [f"{s['code']} {s['name']}"]
+        if s.get("industry"):
+            parts.append(f"行业: {s['industry']}")
+        biz = s.get("business_summary") or ""
+        if biz:
+            parts.append(f"主营: {biz[:80]}")
+        lines.append("- " + " | ".join(parts))
+    candidates = "\n".join(lines)
+
+    today = _hkt_now().strftime("%Y-%m-%d")
+    prompt = f"""今天是 {today}。以下是「{strategy.name}」策略今日选出的 {len(stock_rows)} 只候选股票：
+
+{candidates}
+
+请根据当前的市场热点、板块轮动和主力资金流向趋势，判断这 {len(stock_rows)} 只里哪一只最值得买入。
+只推荐一只，严格按以下 JSON 格式输出：
+{{"code": "6位股票代码", "reason": "一句话理由（30字内，说明契合的热点/趋势）"}}
+
+若认为没有一只值得买，输出 {{"code": null, "reason": "不推荐理由"}}。
+股票代码必须来自上面的候选列表，名称与代码必须匹配。"""
+    try:
+        # 懒加载：strategy_picker 运行在 scheduler 进程里，避免 import 副作用
+        from ai_analyzer import call_qwen_raw
+        raw = call_qwen_raw(prompt, system=_AI_SYSTEM)
+    except Exception as e:
+        logger.warning(f"[{strategy.name}] AI 推荐调用失败，本次不标记: {e}")
+        return None
+
+    text = raw.strip()
+    # 容忍 ```json ... ``` 围栏
+    for opener in ("```json", "```"):
+        if opener in text:
+            text = text.split(opener, 1)[1]
+            if "```" in text:
+                text = text.split("```", 1)[0]
+            break
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError:
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            logger.warning(f"[{strategy.name}] AI 推荐无 JSON 可解析: {raw[:200]}")
+            return None
+        try:
+            data = json.loads(m.group())
+        except json.JSONDecodeError:
+            logger.warning(f"[{strategy.name}] AI 推荐 JSON 解析失败: {raw[:200]}")
+            return None
+
+    code = str(data.get("code") or "").strip()
+    if not code:
+        logger.info(f"[{strategy.name}] AI 本次不推荐买入: {data.get('reason', '')}")
+        return None
+    code = code.split(".")[0]
+    valid = {s["code"] for s in stock_rows}
+    if code not in valid:
+        logger.warning(f"[{strategy.name}] AI 推荐的 {code} 不在候选中，忽略")
+        return None
+    logger.info(f"[{strategy.name}] AI 推荐买入: {code} ({data.get('reason', '')})")
+    return code
+
+
 def _pick_for(strategy: Strategy, db) -> dict:
     """One strategy: query, build batch, return result dict. Caller commits."""
     today = _date.today()
@@ -88,26 +179,11 @@ def _pick_for(strategy: Strategy, db) -> dict:
     # because the iwencai API may not handle full-width chars correctly.
     _query = strategy.query_text.replace("；", ";").replace("，", ",")
 
-    # iwencai via pywencai (no token needed, handles anti-bot internally)
+    # iwencai via Playwright 浏览器（绕过 chameleon 反爬验证码）
     try:
-        import pywencai
-        # Monkey-patch: add Referer to avoid 403 from iwencai
-        try:
-            from pywencai import headers as _pywencai_hdr_mod
-            _orig_headers = _pywencai_hdr_mod.headers
-            def _patched_headers(cookie=None, user_agent=None):
-                h = _orig_headers(cookie=cookie, user_agent=user_agent)
-                h.setdefault("Referer", "https://www.iwencai.com/")
-                return h
-            _pywencai_hdr_mod.headers = _patched_headers
-        except Exception:
-            pass
-        df = pywencai.get(
-            query=_query,
-            sort_key='成交金额', sort_order='desc',
-            loop=False,
-        )
-        if df is None or df.empty:
+        from iwc_browser import query as iwc_query
+        rows = iwc_query(_query, perpage=100)
+        if not rows:
             out["ok"] = True
             out["message"] = "iwencai 今日返回 0 条"
             # Still create a StrategyPick record so frontend can show runs with 0 hits
@@ -123,18 +199,11 @@ def _pick_for(strategy: Strategy, db) -> dict:
             out["hit_count"] = 0
             logger.info(f"[{strategy.name}] {out['message']} (batch={pick.id})")
             return out
-        # Convert DataFrame rows to dicts
-        rows = []
-        for _, row in df.iterrows():
-            r = {}
-            for col in df.columns:
-                r[col] = row[col]
-            rows.append(r)
-        logger.info(f"[{strategy.name}] pywencai returned {len(rows)} rows")
+        logger.info(f"[{strategy.name}] iwencai returned {len(rows)} rows")
     except Exception as e:
-        out["message"] = f"pywencai 查询失败: {e}"
+        out["message"] = f"iwencai 查询失败: {e}"
         out["errors"].append(str(e))
-        logger.exception(f"[{strategy.name}] pywencai crashed")
+        logger.exception(f"[{strategy.name}] iwencai crashed")
         return out
 
     # Build stock rows from pywencai DataFrame output
@@ -166,6 +235,9 @@ def _pick_for(strategy: Strategy, db) -> dict:
         logger.warning(f"[{strategy.name}] {out['message']}")
         return out
 
+    # AI 推荐（仅吸筹）：根据当前市场热点/趋势挑一只最值得买的，用于前端高亮
+    ai_code = _ai_pick_one(strategy, stock_rows) if _should_ai_pick(strategy) else None
+
     pick = StrategyPick(
         strategy_id=strategy.id,
         status="in_progress",
@@ -183,6 +255,7 @@ def _pick_for(strategy: Strategy, db) -> dict:
             industry=s.get("industry"),
             business_summary=s.get("business_summary"),
             selection_reason=None,
+            ai_recommended=(ai_code is not None and s["code"] == ai_code),
             t0_date=today,
             t0_price=s["t0_price"],
         ))

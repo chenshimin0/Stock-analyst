@@ -91,17 +91,26 @@ export default function StrategyDetail() {
             </tr>
           </thead>
           <tbody>
-            {pick.stocks.map((s, i) => (
+            {pick.stocks.map((s, i) => {
+              const isRec = !!s.ai_recommended; // AI 推荐的那一只
+              const rowBg = isRec
+                ? 'linear-gradient(90deg, rgba(250,204,21,0.30), rgba(250,204,21,0.14))'
+                : i % 2 === 0 ? '#0f172a' : '#1a2236';
+              return (
               <tr key={s.id} style={{
-                borderBottom: '1px solid #1e293b',
-                background: i % 2 === 0 ? '#0f172a' : '#1a2236',
+                borderBottom: isRec ? '1px solid rgba(250,204,21,0.5)' : '1px solid #1e293b',
+                background: rowBg,
+                boxShadow: isRec ? 'inset 3px 0 0 #fbbf24' : 'none',
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={e => e.currentTarget.style.background = '#1e3a5f'}
-              onMouseLeave={e => e.currentTarget.style.background = i % 2 === 0 ? '#0f172a' : '#1a2236'}
+              onMouseEnter={e => e.currentTarget.style.background = isRec ? 'linear-gradient(90deg, rgba(250,204,21,0.42), rgba(250,204,21,0.22))' : '#1e3a5f'}
+              onMouseLeave={e => e.currentTarget.style.background = rowBg}
               >
-                <td style={td}><a href={`https://www.iwencai.com/screener/result?w=${encodeURIComponent(s.stock_name)}`} target="_blank" rel="noopener" title={`在 i 问财查看 ${s.stock_name}`}>{s.stock_code}</a></td>
-                <td style={td}>{s.stock_name}</td>
+                <td style={td}><a href={`https://www.iwencai.com/screener/result?w=${encodeURIComponent(s.stock_name)}`} target="_blank" rel="noopener" title={`在 i 问财查看 ${s.stock_name}`} style={{ fontWeight: isRec ? 800 : 400, color: isRec ? '#fde68a' : undefined }}>{s.stock_code}</a></td>
+                <td style={{ ...td, fontWeight: isRec ? 800 : 400, color: isRec ? '#fbbf24' : undefined, fontSize: isRec ? 15 : 13 }}>
+                  {isRec && <span title="AI 根据当前市场热点/趋势推荐">⭐ </span>}
+                  {s.stock_name}
+                </td>
                 <td style={td}>{s.industry || <span style={{color:'#999'}}>—</span>}</td>
                 <td style={{...td, fontSize: 12, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap'}}
                     title={s.business_summary || ''}>
@@ -125,7 +134,8 @@ export default function StrategyDetail() {
                   >✕</button>
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       ) : (

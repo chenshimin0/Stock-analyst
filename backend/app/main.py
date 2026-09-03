@@ -28,6 +28,18 @@ try:
 except Exception:
     pass
 
+# Migration: strategy_pick_stocks.ai_recommended (吸筹策略 AI 推荐标记)
+try:
+    from sqlalchemy import text, inspect
+    inspector = inspect(engine)
+    cols = [c["name"] for c in inspector.get_columns("strategy_pick_stocks")]
+    if "ai_recommended" not in cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE strategy_pick_stocks ADD COLUMN ai_recommended BOOLEAN NOT NULL DEFAULT 0"))
+            conn.commit()
+except Exception:
+    pass
+
 app = FastAPI(title="Stock Analysis Report System", version="1.0.0")
 
 app.add_middleware(

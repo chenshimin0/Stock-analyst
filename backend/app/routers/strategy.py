@@ -31,6 +31,7 @@ def _to_stock_metric(s: StrategyPickStock) -> StrategyStockMetric:
         industry=s.industry,
         business_summary=s.business_summary,
         selection_reason=s.selection_reason,
+        ai_recommended=s.ai_recommended,
         t0_date=s.t0_date,
         t0_price=s.t0_price,
         t1_date=s.t1_date, t1_price=s.t1_price, t1_pct=s.t1_pct,

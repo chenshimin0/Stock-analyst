@@ -375,17 +375,28 @@ function PickCard({ pick, stockFilter, strategyName, onDeleted }) {
           <tbody>
             {preview.map((s, i) => {
               const matched = isMatch(s);
+              const isRec = !!s.ai_recommended; // AI 推荐的那一只
+              const rowBg = isRec
+                ? 'linear-gradient(90deg, rgba(250,204,21,0.30), rgba(250,204,21,0.14))'
+                : matched ? 'rgba(234,179,8,0.15)' : i % 2 === 0 ? '#0f172a' : '#1a2236';
+              const rowBgHover = isRec
+                ? 'linear-gradient(90deg, rgba(250,204,21,0.42), rgba(250,204,21,0.22))'
+                : matched ? 'rgba(234,179,8,0.25)' : '#1e3a5f';
               return (
               <tr key={s.id} style={{
-                borderBottom: '1px solid #1e293b',
-                background: matched ? 'rgba(234,179,8,0.15)' : i % 2 === 0 ? '#0f172a' : '#1a2236',
+                borderBottom: isRec ? '1px solid rgba(250,204,21,0.5)' : '1px solid #1e293b',
+                background: rowBg,
+                boxShadow: isRec ? 'inset 3px 0 0 #fbbf24' : 'none',
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={e => e.currentTarget.style.background = matched ? 'rgba(234,179,8,0.25)' : '#1e3a5f'}
-              onMouseLeave={e => e.currentTarget.style.background = matched ? 'rgba(234,179,8,0.15)' : i % 2 === 0 ? '#0f172a' : '#1a2236'}
+              onMouseEnter={e => e.currentTarget.style.background = rowBgHover}
+              onMouseLeave={e => e.currentTarget.style.background = rowBg}
               >
-                <td style={td}><a href={`https://www.iwencai.com/screener/result?w=${encodeURIComponent(s.stock_name)}`} target="_blank" rel="noopener" style={{ textDecoration: 'none' }} title={`在 i 问财查看 ${s.stock_name}`}><code style={{ fontSize: 12, color: '#93c5fd' }}>{s.stock_code}</code></a></td>
-                <td style={{ ...td, fontWeight: 600, color: '#f0f6fc' }}>{s.stock_name}</td>
+                <td style={td}><a href={`https://www.iwencai.com/screener/result?w=${encodeURIComponent(s.stock_name)}`} target="_blank" rel="noopener" style={{ textDecoration: 'none' }} title={`在 i 问财查看 ${s.stock_name}`}><code style={{ fontSize: 12, color: isRec ? '#fde68a' : '#93c5fd', fontWeight: isRec ? 800 : 400 }}>{s.stock_code}</code></a></td>
+                <td style={{ ...td, fontWeight: isRec ? 800 : 600, color: isRec ? '#fbbf24' : '#f0f6fc', fontSize: isRec ? 15 : 13 }}>
+                  {isRec && <span title="AI 根据当前市场热点/趋势推荐">⭐ </span>}
+                  {s.stock_name}
+                </td>
                 <td style={td}><span style={{ color: s.industry ? '#9ca3af' : '#4b5563', fontSize: 12 }}>{s.industry || '—'}</span></td>
                 <td style={td}>{s.t0_price != null ? s.t0_price.toFixed(2) : '—'}</td>
                 <td style={td}><Pct value={s.t1_pct} /></td>

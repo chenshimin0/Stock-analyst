@@ -5,7 +5,7 @@ Mirrors the sector_pick.py pattern. Uses the same Base as Strategy
 """
 from datetime import datetime, date
 from sqlalchemy import (
-    Column, Integer, String, Text, Float, Date, DateTime, ForeignKey, Index,
+    Column, Integer, String, Text, Float, Boolean, Date, DateTime, ForeignKey, Index,
 )
 from sqlalchemy.orm import relationship
 from app.models.strategy import Base
@@ -48,6 +48,8 @@ class StrategyPickStock(Base):
     industry = Column(String(80), nullable=True)
     business_summary = Column(Text, nullable=True)
     selection_reason = Column(Text, nullable=True)
+    # 吸筹策略：AI 根据当前市场热点/趋势挑出的「最值得买」的那一只
+    ai_recommended = Column(Boolean, nullable=False, default=False)
     t0_date = Column(Date, nullable=False)
     t0_price = Column(Float, nullable=True)
 

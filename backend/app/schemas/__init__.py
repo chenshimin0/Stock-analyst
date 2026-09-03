@@ -158,6 +158,7 @@ class StrategyStockMetric(BaseModel):
     industry: Optional[str] = None
     business_summary: Optional[str] = None
     selection_reason: Optional[str] = None
+    ai_recommended: bool = False
     t0_date: date
     t0_price: Optional[float] = None
     t1_date: Optional[date] = None
