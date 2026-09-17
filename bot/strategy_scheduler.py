@@ -2,7 +2,7 @@
 Strategy scheduler (multi-strategy).
 
 Reads enabled strategies from db on startup and every 10 min after.
-Each strategy has its own cron (HH:MM, weekdays). Tracker job runs 20:00 daily.
+Each strategy has its own cron (HH:MM, weekdays). Tracker job runs 18:00 weekdays.
 
 To reload after adding/editing a strategy: just wait up to 10 min, or
 restart the scheduler. (A future API endpoint could call reload() directly.)
@@ -139,7 +139,7 @@ def main() -> None:
         id="strategy_reload",
         replace_existing=True,
     )
-    logger.info("Scheduler started. Tracker=20:00 weekdays, reload=every 10 min.")
+    logger.info("Scheduler started. Tracker=18:00 weekdays, reload=every 10 min.")
     try:
         scheduler.start()
     except (KeyboardInterrupt, SystemExit):

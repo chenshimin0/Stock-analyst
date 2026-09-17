@@ -1,9 +1,9 @@
 """
-T+3 / T+7 / T+15 / T+30 tracking for strategy picks.
+T+1 / T+2 / T+3 / T+7 / T+15 / T+30 tracking for strategy picks.
 
 For each active StrategyPickStock:
   1. Pull K-line via astock_data.get_kline
-  2. For each milestone n in {3, 7, 15, 30}, find the n-th trading day
+  2. For each milestone n in {1, 2, 3, 7, 15, 30}, find the n-th trading day
      after t0_date and compute pct change vs t0_price
   3. Upsert back to the row (only fills None columns; doesn't overwrite)
 
@@ -28,7 +28,7 @@ from sector_tracker import (  # noqa: E402
 
 logger = logging.getLogger("strategy_tracker")
 
-MILESTONES = (1, 3, 7, 15, 30)
+MILESTONES = (1, 2, 3, 7, 15, 30)
 
 
 def _get_kline(stock_code: str) -> list:

@@ -51,7 +51,8 @@ export default function StrategyDetail() {
   return (
     <div style={{ padding: 24 }}>
       <div style={{ marginBottom: 16 }}>
-        <Link to="/strategy">← 返回列表</Link>
+        {/* 带上 strategy_id，返回列表后保持策略筛选不丢失 */}
+        <Link to={`/strategy?strategy_id=${pick.strategy_id}`}>← 返回列表</Link>
       </div>
 
       <h2>策略批次 #{pick.id} — {pick.strategy_name}</h2>
@@ -83,6 +84,7 @@ export default function StrategyDetail() {
               <th style={th}>主营</th>
               <th style={th}>选入价</th>
               <th style={th}>T+1</th>
+              <th style={th}>T+2</th>
               <th style={th}>T+3</th>
               <th style={th}>T+7</th>
               <th style={th}>T+15</th>
@@ -118,6 +120,7 @@ export default function StrategyDetail() {
                 </td>
                 <td style={td}>{s.t0_price?.toFixed(2) || '—'}</td>
                 <td style={td}><Pct value={s.t1_pct} sub={s.t1_date} /></td>
+                <td style={td}><Pct value={s.t2_pct} sub={s.t2_date} /></td>
                 <td style={td}><Pct value={s.t3_pct} sub={s.t3_date} /></td>
                 <td style={td}><Pct value={s.t7_pct} sub={s.t7_date} /></td>
                 <td style={td}><Pct value={s.t15_pct} sub={s.t15_date} /></td>

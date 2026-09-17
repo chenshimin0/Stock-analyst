@@ -7,11 +7,13 @@ import base64
 import json
 import os
 
-from cryptography.fernet import Fernet
+from cryptography.fernet import Fernet, InvalidToken
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 _ENV_KEY = "SECRET_PASSPHRASE"
+# 与 os.getenv(_ENV_KEY) 未设置时使用的默认 passphrase 保持一致
+_DEFAULT_PASSPHRASE = "wwFblXr9ZyaobfcjNoZhApJZZqUs52+3"
 
 
 def _derive_key(passphrase: str, salt: bytes) -> bytes:
@@ -63,7 +65,23 @@ def load_api_key(env_var: str) -> str:
     with open(enc_path, "r") as f:
         encrypted = f.read().strip()
 
-    return decrypt(encrypted, passphrase)
+    # 兼容混用 passphrase 的 .enc 文件：优先环境变量指定的 passphrase，
+    # 失败（InvalidToken）时回退到默认值。注意 InvalidToken 的 str() 为空，
+    # 必须在这里翻译成有意义的错误信息。
+    candidates = [passphrase]
+    if passphrase != _DEFAULT_PASSPHRASE:
+        candidates.append(_DEFAULT_PASSPHRASE)
+    for pp in candidates:
+        try:
+            return decrypt(encrypted, pp)
+        except InvalidToken:
+            continue
+        except Exception as e:
+            raise RuntimeError(f"解密 {enc_path} 失败: {e}") from e
+    raise RuntimeError(
+        f"解密 {enc_path} 失败：该文件不是用环境变量 SECRET_PASSPHRASE "
+        f"加密的，也与默认 passphrase 不匹配"
+    )
 
 
 def load_10jqka_credentials() -> dict:

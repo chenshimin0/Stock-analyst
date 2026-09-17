@@ -14,6 +14,7 @@ import json
 import logging
 import re
 import sys
+import time
 from datetime import datetime, date as _date, timezone, timedelta
 from pathlib import Path
 
@@ -72,8 +73,51 @@ def _get_industry_business(code: str) -> dict:
         return {}
 
 
+def _get_industry_em(code: str) -> str | None:
+    """东财 F10 公司概况拿行业分类（EM2016，如「商贸零售-零售-百货」）。
+
+    免登录、无需 cookie，作为问财免费额度不带行业列时的兜底。
+    失败返回 None（静默，不影响选股落库）。
+    """
+    if not code or len(code) != 6:
+        return None
+    if code.startswith(("6", "9")):
+        prefix = "SH"
+    elif code.startswith(("4", "8")):
+        prefix = "BJ"
+    else:
+        prefix = "SZ"
+    url = (f"https://emweb.securities.eastmoney.com"
+           f"/PC_HSF10/CompanySurvey/PageAjax?code={prefix}{code}")
+    try:
+        import gzip as _gzip
+        import urllib.request
+        req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        data = None
+        for attempt in range(2):  # 东财偶发抽风，重试一次
+            try:
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    raw = resp.read()
+                # 东财有时返回 gzip 压缩体（无论客户端是否声明 Accept-Encoding）
+                if raw[:2] == b"\x1f\x8b":
+                    raw = _gzip.decompress(raw)
+                data = json.loads(raw.decode("utf-8"))
+                break
+            except Exception as e:
+                if attempt == 0:
+                    logger.warning(f"get_industry_em({code}) retry: {e}")
+                    continue
+                raise
+        jbzl = (data or {}).get("jbzl") or []
+        em = str((jbzl[0].get("EM2016") or "")).strip() if jbzl else ""
+        return em or None
+    except Exception as e:
+        logger.warning(f"get_industry_em({code}) failed: {e}")
+        return None
+
+
 # ============================================================
-# AI 推荐（吸筹策略）：每次跑出结果后，让 AI 根据当前市场热点/趋势挑一只最值得买的
+# AI 推荐：每次跑出结果后，让 AI 根据当前市场热点/趋势挑一只最值得买的
 # ============================================================
 _AI_SYSTEM = (
     "你是一位资深A股短线分析师，擅长捕捉市场热点与板块轮动趋势。"
@@ -82,10 +126,8 @@ _AI_SYSTEM = (
 
 
 def _should_ai_pick(strategy: Strategy) -> bool:
-    """只有「吸筹」策略跑出结果后需要 AI 挑一只。"""
-    if not strategy:
-        return False
-    return strategy.id == 3 or "吸筹" in (strategy.name or "")
+    """所有策略跑出结果后都由 AI 挑一只（原来是吸筹专属，现已全量开放）。"""
+    return bool(strategy)
 
 
 def _ai_pick_one(strategy: Strategy, stock_rows: list[dict]) -> str | None:
@@ -161,6 +203,108 @@ def _ai_pick_one(strategy: Strategy, stock_rows: list[dict]) -> str | None:
     return code
 
 
+# ============================================================
+# 排序子句对齐：问财网页会按查询里的「从高到低排序」子句排序展示，
+# 但 wap API 返回的是原始顺序（不排）。max_stocks 截「前 N 只」必须
+# 与网页看到的前 N 只一致，所以落库前按排序子句对返回行重排。
+# 实际写法有多种：周成交量(从高到低排序)、(周成交量)从高到低排序、
+# 按周涨跌幅从小到大排序 —— 统一按方向词定位、向前截取字段名。
+# ============================================================
+_DIR_RE = re.compile(
+    r"(?:从|由)(?:高|大|低|小)到(?:高|大|低|小)(?:排序)?|降序|倒序|升序|正序"
+)
+_BRACE_RE = re.compile(r"\{(.)\}")
+_DATE_RE = re.compile(r"\[[^\]]*\]")
+
+
+def _norm_field(name: str) -> str:
+    """把问财字段名归一化：{(}周成交量[20260915]{/}区间成交量[..]{)} → (周成交量/区间成交量)"""
+    return _DATE_RE.sub("", _BRACE_RE.sub(r"\1", name))
+
+
+def _lcs(a: str, b: str) -> int:
+    """最长公共子串长度（小字符串，O(n*m) 足够）。"""
+    if not a or not b:
+        return 0
+    prev = [0] * (len(b) + 1)
+    best = 0
+    for ca in a:
+        cur = [0] * (len(b) + 1)
+        for j, cb in enumerate(b, 1):
+            if ca == cb:
+                cur[j] = prev[j - 1] + 1
+                best = max(best, cur[j])
+        prev = cur
+    return best
+
+
+def _detect_query_sort(query_text: str, rows: list[dict]):
+    """在查询文本里找排序方向词，向前截取字段名，并在返回行字段中找最匹配的列。
+
+    返回 (field_name, reverse)；找不到方向词或匹配度过低时返回 None。
+    """
+    if not query_text or not rows:
+        return None
+    best = None  # (score, field, reverse)
+    for m in _DIR_RE.finditer(query_text):
+        direction = m.group(0)
+        reverse = not any(w in direction for w in ("低到", "小到", "升序", "正序"))
+        before = query_text[: m.start()]
+        # 优先取紧邻的括号包字段：(周成交量/近5日成交量)从高到低排序
+        mm = re.search(r"\(([^()（）]+)\)\s*$", before)
+        if mm:
+            key_txt = mm.group(1)
+        else:
+            # 否则取方向词前、上一个分隔符之后的片段：
+            # 周成交量(从高到低排序) / 按周涨跌幅从小到大排序
+            seg = re.split(r"[，,；;。]", before)[-1]
+            key_txt = seg.strip().lstrip("按").rstrip("(（").strip()
+        if len(key_txt) < 2:
+            continue
+        parts = [p for p in re.split(r"[/／与和]", key_txt) if len(p) >= 2] or [key_txt]
+        # key 本身是复合指标（如 周成交量/近5日成交量）时，优先匹配同样
+        # 带分隔符的复合列，避免「周成交量」这种单项列靠子串蹭到同分
+        key_is_composite = any(sep in key_txt for sep in ("/", "／", "与", "和"))
+        for f in rows[0].keys():
+            nf = _norm_field(f)
+            score = sum(_lcs(p, nf) for p in parts)
+            if score < 3:
+                continue
+            # 排除没有任何数值的列（如「389/5562」式排名、股票简称）
+            if not any(_to_float(r.get(f)) is not None for r in rows[:20]):
+                continue
+            sep_bonus = 1 if key_is_composite and any(
+                sep in nf for sep in ("/", "与", "和")) else 0
+            cand = (score, sep_bonus)
+            if best is None or cand > (best[0], best[1]):
+                best = (score, sep_bonus, f, reverse)
+    return (best[2], best[3]) if best else None
+
+
+def _to_float(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return None
+
+
+def _sort_rows_by_query(rows: list[dict], query_text: str) -> list[dict]:
+    """按查询文本的排序子句重排 API 返回行；无子句/无匹配字段时原样返回。"""
+    detected = _detect_query_sort(query_text, rows)
+    if not detected:
+        return rows
+    field, reverse = detected
+    present, missing = [], []
+    for i, r in enumerate(rows):
+        v = _to_float(r.get(field))
+        (present if v is not None else missing).append((v, i, r))
+    present.sort(key=lambda t: t[0], reverse=reverse)  # 稳定排序
+    ordered = [r for _, _, r in present] + [r for _, _, r in missing]
+    logger.info(f"按查询排序子句重排: field={field!r} reverse={reverse} "
+                f"({len(present)} 有值 + {len(missing)} 缺值置尾)")
+    return ordered
+
+
 def _pick_for(strategy: Strategy, db) -> dict:
     """One strategy: query, build batch, return result dict. Caller commits."""
     today = _date.today()
@@ -180,31 +324,46 @@ def _pick_for(strategy: Strategy, db) -> dict:
     _query = strategy.query_text.replace("；", ";").replace("，", ",")
 
     # iwencai via Playwright 浏览器（绕过 chameleon 反爬验证码）
-    try:
-        from iwc_browser import query as iwc_query
-        rows = iwc_query(_query, perpage=100)
-        if not rows:
-            out["ok"] = True
-            out["message"] = "iwencai 今日返回 0 条"
-            # Still create a StrategyPick record so frontend can show runs with 0 hits
-            pick = StrategyPick(
-                strategy_id=strategy.id,
-                status="completed",
-                hit_count=0,
-                created_at=now,
-            )
-            db.add(pick)
-            db.commit()
-            out["batch_id"] = pick.id
-            out["hit_count"] = 0
-            logger.info(f"[{strategy.name}] {out['message']} (batch={pick.id})")
-            return out
-        logger.info(f"[{strategy.name}] iwencai returned {len(rows)} rows")
-    except Exception as e:
-        out["message"] = f"iwencai 查询失败: {e}"
-        out["errors"].append(str(e))
-        logger.exception(f"[{strategy.name}] iwencai crashed")
+    # 失败重试：浏览器冷启动可能遇到网络超时（ERR_TIMED_OUT）等瞬时故障，
+    # 一个策略每天往往只有一个时间点，错过就没了，所以最多重试 3 次。
+    rows = None
+    last_err: Exception | None = None
+    for attempt in range(1, 4):
+        try:
+            from iwc_browser import query as iwc_query
+            rows = iwc_query(_query, perpage=100)
+            break
+        except Exception as e:
+            last_err = e
+            logger.warning(f"[{strategy.name}] iwencai attempt {attempt}/3 failed: {e}")
+            if attempt < 3:
+                time.sleep(15)  # 失败时 iwc_browser 会关闭会话，下次重试将冷启动
+    if rows is None:
+        out["message"] = f"iwencai 查询失败(已重试3次): {last_err}"
+        out["errors"].append(str(last_err))
+        logger.error(f"[{strategy.name}] iwencai crashed after retries")
         return out
+    if not rows:
+        out["ok"] = True
+        out["message"] = "iwencai 今日返回 0 条"
+        # Still create a StrategyPick record so frontend can show runs with 0 hits
+        pick = StrategyPick(
+            strategy_id=strategy.id,
+            status="completed",
+            hit_count=0,
+            created_at=now,
+        )
+        db.add(pick)
+        db.commit()
+        out["batch_id"] = pick.id
+        out["hit_count"] = 0
+        logger.info(f"[{strategy.name}] {out['message']} (batch={pick.id})")
+        return out
+    logger.info(f"[{strategy.name}] iwencai returned {len(rows)} rows")
+
+    # 对齐问财网页排序：网页按查询里的排序子句展示，API 原始顺序没排，
+    # max_stocks 截「前 N 只」前必须重排，否则截到的不是网页上的前 N 只
+    rows = _sort_rows_by_query(rows, strategy.query_text)
 
     # Build stock rows from pywencai DataFrame output
     stock_rows = []
@@ -221,6 +380,14 @@ def _pick_for(strategy: Strategy, db) -> dict:
         industry_full = (r.get("所属同花顺行业") or "").strip()
         industry = industry_full.split("-")[-1] if industry_full else None
         business = (r.get("经营范围") or "").strip()
+        # 问财免费额度可能不带行业列，缺失时走 10jqka F10 → 东财 F10 兜底
+        if not industry:
+            ind_fb = (_get_industry_business(code).get("industry") or "") or _get_industry_em(code) or ""
+            ind_fb = ind_fb.strip()
+            # 兼容「A - B - C」与「A — B」两种分隔格式，取最后一段
+            industry = ind_fb.split("—")[-1].split("-")[-1].strip() or None
+            if industry:
+                logger.info(f"[{strategy.name}] {code} 行业兜底(东财F10): {industry}")
         stock_rows.append({
             "code": code,
             "name": name,
@@ -235,7 +402,13 @@ def _pick_for(strategy: Strategy, db) -> dict:
         logger.warning(f"[{strategy.name}] {out['message']}")
         return out
 
-    # AI 推荐（仅吸筹）：根据当前市场热点/趋势挑一只最值得买的，用于前端高亮
+    # max_stocks：只保留问财返回顺序的前 N 只（NULL/0 = 全部保留）
+    max_stocks = getattr(strategy, "max_stocks", None)
+    if max_stocks and max_stocks > 0 and len(stock_rows) > max_stocks:
+        stock_rows = stock_rows[:max_stocks]
+        logger.info(f"[{strategy.name}] max_stocks={max_stocks}，从 {len(rows)} 条截取前 {max_stocks} 只")
+
+    # AI 推荐：根据当前市场热点/趋势挑一只最值得买的，用于前端高亮
     ai_code = _ai_pick_one(strategy, stock_rows) if _should_ai_pick(strategy) else None
 
     pick = StrategyPick(

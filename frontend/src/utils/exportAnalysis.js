@@ -2,6 +2,7 @@ import * as XLSX from 'xlsx';
 
 const PERIODS = [
   { label: 'T+1',  pct: 't1_pct' },
+  { label: 'T+2',  pct: 't2_pct' },
   { label: 'T+3',  pct: 't3_pct' },
   { label: 'T+7',  pct: 't7_pct' },
   { label: 'T+15', pct: 't15_pct' },

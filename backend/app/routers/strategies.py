@@ -31,6 +31,7 @@ def _to_out(s: Strategy) -> StrategyOut:
         query_text=s.query_text,
         schedule_cron=s.schedule_cron,
         enabled=s.enabled,
+        max_stocks=s.max_stocks,
         created_at=s.created_at,
         updated_at=s.updated_at,
         total_picks=len(s.picks),
@@ -83,6 +84,8 @@ def update_strategy(sid: int, data: StrategyUpdate, db: Session = Depends(get_db
         s.schedule_cron = data.schedule_cron
     if data.enabled is not None:
         s.enabled = data.enabled
+    if data.max_stocks is not None:
+        s.max_stocks = data.max_stocks or None
     db.commit()
     db.refresh(s)
     return _to_out(s)

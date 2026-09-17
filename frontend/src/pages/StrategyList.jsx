@@ -15,11 +15,22 @@ export default function StrategyList() {
   const [strategies, setStrategies] = useState([]);
   const [loading, setLoading] = useState(true);
   const [err, setErr] = useState(null);
-  const [params] = useSearchParams();
-  const filterStrategyId = params.get('strategy_id') ? Number(params.get('strategy_id')) : null;
-
-  // Filters
-  const [selectedStrategy, setSelectedStrategy] = useState(filterStrategyId ? String(filterStrategyId) : '');
+  // 筛选条件同步到 URL（strategy_id / page），从批次详情返回列表时自动恢复
+  const [searchParams, setSearchParams] = useSearchParams();
+  const selectedStrategy = searchParams.get('strategy_id') || '';
+  const setSelectedStrategy = (v) => {
+    const next = new URLSearchParams(searchParams);
+    if (v) next.set('strategy_id', v); else next.delete('strategy_id');
+    setSearchParams(next);
+  };
+  const page = Math.max(1, Number(searchParams.get('page')) || 1);
+  const setPage = (p) => {
+    const target = Math.max(1, typeof p === 'function' ? p(page) : p);
+    if (String(target) === (searchParams.get('page') || '1')) return; // 避免同值重复触发请求
+    const next = new URLSearchParams(searchParams);
+    next.set('page', String(target));
+    setSearchParams(next);
+  };
   const [selectedDate, setSelectedDate] = useState('');
   const [stockFilter, setStockFilter] = useState('');
   const [searchTerm, setSearchTerm] = useState('');
@@ -31,8 +42,7 @@ export default function StrategyList() {
     return () => clearTimeout(t);
   }, [stockFilter]);
 
-  // Pagination
-  const [page, setPage] = useState(1);
+  // Pagination（page 来自 URL）
   const [totalItems, setTotalItems] = useState(0);
   const totalPages = Math.max(1, Math.ceil(totalItems / pageSize));
 
@@ -71,11 +81,6 @@ export default function StrategyList() {
 
   // Reset page when tab, strategy or search changes
   useEffect(() => { setPage(1); }, [tab, selectedStrategy, searchTerm]);
-
-  // Set initial strategy from URL param
-  useEffect(() => {
-    if (filterStrategyId) setSelectedStrategy(String(filterStrategyId));
-  }, [filterStrategyId]);
 
   // --- Derived data ---
   // All unique dates from picks (current page)
@@ -365,6 +370,7 @@ function PickCard({ pick, stockFilter, strategyName, onDeleted }) {
               <th style={{...th, color: '#e5e7eb'}}>行业</th>
               <th style={{...th, color: '#e5e7eb'}}>选入价</th>
               <th style={{...th, color: '#e5e7eb'}}>T+1</th>
+              <th style={{...th, color: '#e5e7eb'}}>T+2</th>
               <th style={{...th, color: '#e5e7eb'}}>T+3</th>
               <th style={{...th, color: '#e5e7eb'}}>T+7</th>
               <th style={{...th, color: '#e5e7eb'}}>T+15</th>
@@ -400,6 +406,7 @@ function PickCard({ pick, stockFilter, strategyName, onDeleted }) {
                 <td style={td}><span style={{ color: s.industry ? '#9ca3af' : '#4b5563', fontSize: 12 }}>{s.industry || '—'}</span></td>
                 <td style={td}>{s.t0_price != null ? s.t0_price.toFixed(2) : '—'}</td>
                 <td style={td}><Pct value={s.t1_pct} /></td>
+                <td style={td}><Pct value={s.t2_pct} /></td>
                 <td style={td}><Pct value={s.t3_pct} /></td>
                 <td style={td}><Pct value={s.t7_pct} /></td>
                 <td style={td}><Pct value={s.t15_pct} /></td>
@@ -434,6 +441,7 @@ function PickCard({ pick, stockFilter, strategyName, onDeleted }) {
 function AvgCells({ pick }) {
   const cells = [
     { label: 'T+1', v: pick.avg_t1_pct },
+    { label: 'T+2', v: pick.avg_t2_pct },
     { label: 'T+3', v: pick.avg_t3_pct },
     { label: 'T+7', v: pick.avg_t7_pct },
     { label: 'T+15', v: pick.avg_t15_pct },

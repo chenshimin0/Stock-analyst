@@ -164,6 +164,9 @@ class StrategyStockMetric(BaseModel):
     t1_date: Optional[date] = None
     t1_price: Optional[float] = None
     t1_pct: Optional[float] = None
+    t2_date: Optional[date] = None
+    t2_price: Optional[float] = None
+    t2_pct: Optional[float] = None
     t3_date: Optional[date] = None
     t3_price: Optional[float] = None
     t3_pct: Optional[float] = None
@@ -191,6 +194,7 @@ class StrategyPickListItem(BaseModel):
     strategy_name: str = ""
     stocks_preview: list[StrategyStockMetric] = []
     avg_t1_pct: Optional[float] = None
+    avg_t2_pct: Optional[float] = None
     avg_t3_pct: Optional[float] = None
     avg_t7_pct: Optional[float] = None
     avg_t15_pct: Optional[float] = None
@@ -210,6 +214,7 @@ class StrategyPickDetail(BaseModel):
     query_text: str = ""
     strategy_name: str = ""
     avg_t1_pct: Optional[float] = None
+    avg_t2_pct: Optional[float] = None
     avg_t3_pct: Optional[float] = None
     avg_t7_pct: Optional[float] = None
     avg_t15_pct: Optional[float] = None
@@ -236,6 +241,7 @@ class StrategyOut(BaseModel):
     query_text: str
     schedule_cron: str
     enabled: bool
+    max_stocks: Optional[int] = None
     created_at: datetime
     updated_at: datetime
     total_picks: int = 0
@@ -249,6 +255,7 @@ class StrategyCreate(BaseModel):
     query_text: str
     schedule_cron: str = "14:30"
     enabled: bool = True
+    max_stocks: Optional[int] = None
 
 
 class StrategyUpdate(BaseModel):
@@ -256,5 +263,6 @@ class StrategyUpdate(BaseModel):
     query_text: Optional[str] = None
     schedule_cron: Optional[str] = None
     enabled: Optional[bool] = None
+    max_stocks: Optional[int] = None
 
     model_config = {"from_attributes": True}

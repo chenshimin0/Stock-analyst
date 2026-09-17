@@ -30,11 +30,16 @@ class Strategy(Base):
     query_text = Column(Text, nullable=False)
     schedule_cron = Column(String(20), nullable=False, default="14:30")
     enabled = Column(Boolean, nullable=False, default=True)
+    # 最多保留股票数：跑批后只保留问财返回的前 N 只；NULL/0 = 全部保留
+    max_stocks = Column(Integer, nullable=True)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
                         onupdate=datetime.utcnow)
 
-    picks = relationship("StrategyPick", back_populates="strategy")
+    picks = relationship(
+        "StrategyPick", back_populates="strategy",
+        cascade="all, delete-orphan",
+    )
 
     __table_args__ = (
         Index("ix_strategies_enabled", "enabled"),

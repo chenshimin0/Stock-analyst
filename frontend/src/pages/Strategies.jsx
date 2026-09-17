@@ -5,7 +5,7 @@ import {
   deleteStrategy, toggleStrategy, runStrategyNow,
 } from '../api/strategies.js';
 
-const EMPTY_FORM = { name: '', query_text: '', schedule_cron: '14:30', enabled: true };
+const EMPTY_FORM = { name: '', query_text: '', schedule_cron: '14:30', enabled: true, max_stocks: '' };
 
 export default function Strategies() {
   const [items, setItems] = useState([]);
@@ -27,10 +27,13 @@ export default function Strategies() {
 
   const handleSave = async (form) => {
     try {
+      // 空字符串/非法值统一转 0（后端约定 0 = 全部保留），避免 Pydantic 422
+      const n = parseInt(form.max_stocks, 10);
+      const payload = { ...form, max_stocks: Number.isFinite(n) && n > 0 ? n : 0 };
       if (editing === 'new') {
-        await createStrategy(form);
+        await createStrategy(payload);
       } else if (editing && editing.id) {
-        await updateStrategy(editing.id, form);
+        await updateStrategy(editing.id, payload);
       }
       setEditing(null);
       load();
@@ -96,6 +99,7 @@ export default function Strategies() {
               <th style={th}>ID</th>
               <th style={th}>名称</th>
               <th style={th}>调度</th>
+              <th style={th}>保留</th>
               <th style={th}>状态</th>
               <th style={th}>批次</th>
               <th style={th}>上次跑批</th>
@@ -108,6 +112,7 @@ export default function Strategies() {
                 <td style={td}>#{s.id}</td>
                 <td style={td}><b>{s.name}</b></td>
                 <td style={{...td, fontSize: 13}}>工作日 {s.schedule_cron.replace(/,/g, ', ')}</td>
+                <td style={{...td, fontSize: 13}}>{s.max_stocks ? `前 ${s.max_stocks} 只` : '全部'}</td>
                 <td style={td}>
                   <span style={{
                     padding: '2px 8px', borderRadius: 4, fontSize: 12,
@@ -160,6 +165,7 @@ export default function Strategies() {
           initial={editing === 'new' ? EMPTY_FORM : {
             name: editing.name, query_text: editing.query_text,
             schedule_cron: editing.schedule_cron, enabled: editing.enabled,
+            max_stocks: editing.max_stocks || '',
           }}
           onSave={handleSave}
           onCancel={() => setEditing(null)}
@@ -190,6 +196,13 @@ function StrategyForm({ initial, onSave, onCancel }) {
           <input style={{...input, width: 180}} value={form.schedule_cron}
                  placeholder="09:35,14:45"
                  onChange={e => setForm({...form, schedule_cron: e.target.value})} />
+        </label>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label style={label}>保留股票数（跑批后只保留排序靠前的 N 只，留空=全部保留）<br/>
+          <input type="number" min="1" style={{...input, width: 180}} value={form.max_stocks}
+                 placeholder="全部保留"
+                 onChange={e => setForm({...form, max_stocks: e.target.value})} />
         </label>
       </div>
       <div style={{ marginBottom: 12 }}>
