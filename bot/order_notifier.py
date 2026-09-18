@@ -283,7 +283,6 @@ def _push_batch(db, pick: StrategyPick, strategy: Optional[Strategy],
     title = f"📈 {sname} 建议单 · {datetime.now().strftime('%m-%d')}"
     # PC 微信对模板消息只渲染前两个字段（策略/批次），且字段内多行会折叠。
     # 因此改为：每只股票一条 + 一条汇总，全部只用 strategy/batch 两个字段、单行文本。
-    suffix = f"（另有{len(rejected)}只未过风控）" if rejected else ""
     n = len(ok_rows)
     sent = True
     for i, r in enumerate(ok_rows, 1):
@@ -295,11 +294,6 @@ def _push_batch(db, pick: StrategyPick, strategy: Optional[Strategy],
         if not ok:
             sent = False
             break
-    if sent:
-        sent = send_wechat_template({
-            "strategy": f"{sname} 建议单汇总",
-            "batch": f"{n}只 · 合计{total:,.0f}元{suffix}",
-        })
     if not sent:
         # 微信模板通道失败 → Server酱 网页卡片兜底（一整条带完整表格）
         sent = send_serverchan(title, "\n".join(lines))
