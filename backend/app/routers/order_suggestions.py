@@ -67,7 +67,7 @@ def generate_suggestions(req: OrderGenerateRequest, db: Session = Depends(get_db
         if not latest:
             raise HTTPException(404, "没有可用批次")
         batch_id = latest.id
-    out = generate_for_batch(batch_id, push=req.push)
+    out = generate_for_batch(batch_id, push=req.push, force=req.force)
     if not out.get("ok"):
         raise HTTPException(400, out.get("message", "生成失败"))
     return out

@@ -100,6 +100,34 @@ def load_10jqka_credentials() -> dict:
     return json.loads(decrypt(encrypted, passphrase))
 
 
+def load_wxtest_credentials() -> dict:
+    """从加密文件加载微信测试号凭据。
+    返回 {'appid', 'secret', 'openid', 'template_id'}
+    """
+    enc_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "wxtest.enc")
+    if not os.path.exists(enc_path):
+        raise RuntimeError("wxtest.enc 加密文件未找到")
+
+    passphrase = os.getenv(_ENV_KEY)
+    if not passphrase:
+        passphrase = _DEFAULT_PASSPHRASE
+
+    with open(enc_path, "r") as f:
+        encrypted = f.read().strip()
+
+    candidates = [passphrase]
+    if passphrase != _DEFAULT_PASSPHRASE:
+        candidates.append(_DEFAULT_PASSPHRASE)
+    for pp in candidates:
+        try:
+            return json.loads(decrypt(encrypted, pp))
+        except InvalidToken:
+            continue
+        except Exception as e:
+            raise RuntimeError(f"解密 {enc_path} 失败: {e}") from e
+    raise RuntimeError("解密 wxtest.enc 失败：与所有候选 passphrase 不匹配")
+
+
 def load_serverchan_token() -> str:
     """从加密文件加载 Server酱 SendKey。
     加密文件: bot/serverchan.enc（用 default passphrase 或环境变量加密均可，

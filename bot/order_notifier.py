@@ -10,6 +10,7 @@
 4. Token 安全：Server酱 SendKey 用 Fernet 加密存于 bot/serverchan.enc，
    不出现明文、不进 git。
 """
+import json
 import logging
 import math
 import sys
@@ -52,6 +53,50 @@ def get_config(db) -> OrderConfig:
 # Server酱 push
 # =========================================================================
 
+WX_API = "https://api.weixin.qq.com/cgi-bin"
+
+
+def _wx_access_token(appid: str, secret: str) -> str:
+    r = requests.get(f"{WX_API}/token",
+                     params={"grant_type": "client_credential", "appid": appid,
+                             "secret": secret},
+                     timeout=15).json()
+    if "access_token" not in r:
+        raise RuntimeError(f"获取 access_token 失败: {r}")
+    return r["access_token"]
+
+
+def send_wechat_template(fields: dict) -> bool:
+    """微信测试号模板消息：内容直接显示在聊天气泡里，不跳网页。
+    fields: {strategy, batch, stocks, total, note}，值为纯文本。
+    失败返回 False（由调用方决定是否走 Server酱 兜底）。
+    """
+    try:
+        from crypto_utils import load_wxtest_credentials
+        creds = load_wxtest_credentials()
+    except Exception as e:
+        logger.warning(f"wxtest 凭据不可用，跳过模板消息: {e}")
+        return False
+    try:
+        tok = _wx_access_token(creds["appid"], creds["secret"])
+        payload = {
+            "touser": creds["openid"],
+            "template_id": creds["template_id"],
+            "data": {k: {"value": str(v)} for k, v in fields.items() if v},
+        }
+        r = requests.post(f"{WX_API}/message/template/send",
+                          params={"access_token": tok},
+                          data=json.dumps(payload, ensure_ascii=False).encode("utf-8"),
+                          timeout=15).json()
+        if r.get("errcode") == 0:
+            return True
+        logger.error(f"wx template send failed: {r}")
+        return False
+    except Exception as e:
+        logger.error(f"wx template send error: {e}")
+        return False
+
+
 def send_serverchan(title: str, desp: str) -> bool:
     """Push one message via ServerChan Turbo. Returns True on code==0."""
     from crypto_utils import load_serverchan_token
@@ -76,13 +121,19 @@ def send_serverchan(title: str, desp: str) -> bool:
 
 
 def test_push() -> bool:
-    """发一条测试消息验证 token 与微信通道。"""
-    ok = send_serverchan(
-        "✅ 股票系统推送通道测试",
-        "这是股票分析系统的测试消息。\n\n"
-        "收到这条说明 Server酱 通道已打通，"
-        "之后策略跑批的建议单会推送到这里。",
-    )
+    """发一条测试消息验证推送通道。优先微信模板，失败走 Server酱。"""
+    ok = send_wechat_template({
+        "strategy": "通道测试",
+        "batch": datetime.now().strftime("%m-%d %H:%M"),
+        "stocks": "收到即代表微信模板消息通道正常",
+        "total": "—",
+        "note": "之后策略跑批的建议单会推送到这里。",
+    })
+    if not ok:
+        ok = send_serverchan(
+            "✅ 股票系统推送通道测试",
+            "这是股票分析系统的测试消息（微信模板通道失败，Server酱 兜底）。",
+        )
     logger.info(f"test_push -> {ok}")
     return ok
 
@@ -91,7 +142,8 @@ def test_push() -> bool:
 # Suggestion generation
 # =========================================================================
 
-def generate_for_batch(batch_id: int, push: bool = True, db=None) -> dict:
+def generate_for_batch(batch_id: int, push: bool = True, db=None,
+                       force: bool = False) -> dict:
     """为一个批次生成建议单（可选推送）。
 
     Returns: {ok, created, pushed, message}
@@ -111,8 +163,9 @@ def generate_for_batch(batch_id: int, push: bool = True, db=None) -> dict:
         if existing:
             # 幂等：同批次不重复生成；若还没推送成功则允许重推
             not_pushed = [s for s in existing if not s.pushed]
-            if push and not_pushed:
-                return _push_batch(db, pick, strategy, not_pushed)
+            if push and (not_pushed or force):
+                # force=True 时连同已推送过的一起重推（换推送通道后补推用）
+                return _push_batch(db, pick, strategy, existing if force else not_pushed)
             return {"ok": True, "created": 0, "pushed": False,
                     "message": f"batch {batch_id} 已生成过 {len(existing)} 条建议单，跳过"}
 
@@ -228,7 +281,22 @@ def _push_batch(db, pick: StrategyPick, strategy: Optional[Strategy],
     lines.append("> 半自动提醒：系统不下单，请自行核实后在券商 App 操作。")
 
     title = f"📈 {sname} 建议单 · {datetime.now().strftime('%m-%d')}"
-    sent = send_serverchan(title, "\n".join(lines))
+    # 微信测试号模板消息（内容直接显示在聊天里）优先，Server酱网页卡片兜底
+    note_parts = ["半自动提醒：系统不下单，请自行核实后在券商App操作。"]
+    if rejected:
+        note_parts.append(f"另有 {len(rejected)} 只未过风控未列入（见页面详情）。")
+    wx_fields = {
+        "strategy": sname,
+        "batch": f"#{pick.id} · {datetime.now().strftime('%m-%d %H:%M')}",
+        "stocks": "\n".join(
+            f"{r.stock_code} {r.stock_name} {r.suggested_price:.2f} x {r.shares}股"
+            f" = {r.amount:,.0f}元" for r in ok_rows),
+        "total": f"¥{total:,.0f} · {len(ok_rows)} 只",
+        "note": " ".join(note_parts),
+    }
+    sent = send_wechat_template(wx_fields)
+    if not sent:
+        sent = send_serverchan(title, "\n".join(lines))
     now = datetime.utcnow()
     for r in rows:
         if sent:

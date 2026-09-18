@@ -302,6 +302,7 @@ class OrderGenerateRequest(BaseModel):
     batch_id: Optional[int] = None  # 缺省 = 该策略最新批次（须先填 strategy_id）
     strategy_id: Optional[int] = None
     push: bool = True
+    force: bool = False  # 已生成过时重推（换通道补推）
 
 
 class OrderConfigOut(BaseModel):
