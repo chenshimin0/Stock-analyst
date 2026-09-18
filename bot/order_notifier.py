@@ -281,21 +281,27 @@ def _push_batch(db, pick: StrategyPick, strategy: Optional[Strategy],
     lines.append("> 半自动提醒：系统不下单，请自行核实后在券商 App 操作。")
 
     title = f"📈 {sname} 建议单 · {datetime.now().strftime('%m-%d')}"
-    # 微信测试号模板消息（内容直接显示在聊天里）优先，Server酱网页卡片兜底
-    note_parts = ["半自动提醒：系统不下单，请自行核实后在券商App操作。"]
-    if rejected:
-        note_parts.append(f"另有 {len(rejected)} 只未过风控未列入（见页面详情）。")
-    wx_fields = {
-        "strategy": sname,
-        "batch": f"#{pick.id} · {datetime.now().strftime('%m-%d %H:%M')}",
-        "stocks": "\n".join(
-            f"{r.stock_code} {r.stock_name} {r.suggested_price:.2f} x {r.shares}股"
-            f" = {r.amount:,.0f}元" for r in ok_rows),
-        "total": f"¥{total:,.0f} · {len(ok_rows)} 只",
-        "note": " ".join(note_parts),
-    }
-    sent = send_wechat_template(wx_fields)
+    # PC 微信对模板消息只渲染前两个字段（策略/批次），且字段内多行会折叠。
+    # 因此改为：每只股票一条 + 一条汇总，全部只用 strategy/batch 两个字段、单行文本。
+    suffix = f"（另有{len(rejected)}只未过风控）" if rejected else ""
+    n = len(ok_rows)
+    sent = True
+    for i, r in enumerate(ok_rows, 1):
+        ok = send_wechat_template({
+            "strategy": f"{sname} 建议单 {i}/{n}",
+            "batch": f"{r.stock_name} {r.suggested_price:.2f} x {r.shares}股"
+                     f" = {r.amount:,.0f}元",
+        })
+        if not ok:
+            sent = False
+            break
+    if sent:
+        sent = send_wechat_template({
+            "strategy": f"{sname} 建议单汇总",
+            "batch": f"{n}只 · 合计{total:,.0f}元{suffix}",
+        })
     if not sent:
+        # 微信模板通道失败 → Server酱 网页卡片兜底（一整条带完整表格）
         sent = send_serverchan(title, "\n".join(lines))
     now = datetime.utcnow()
     for r in rows:
