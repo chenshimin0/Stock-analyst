@@ -32,6 +32,8 @@ class Strategy(Base):
     enabled = Column(Boolean, nullable=False, default=True)
     # 最多保留股票数：跑批后只保留问财返回的前 N 只；NULL/0 = 全部保留
     max_stocks = Column(Integer, nullable=True)
+    # 跑批成功后是否推送微信建议单（Server酱）；默认关，逐策略开启
+    notify_wechat = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime, nullable=False, default=datetime.utcnow)
     updated_at = Column(DateTime, nullable=False, default=datetime.utcnow,
                         onupdate=datetime.utcnow)

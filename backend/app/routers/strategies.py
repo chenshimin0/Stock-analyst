@@ -32,6 +32,7 @@ def _to_out(s: Strategy) -> StrategyOut:
         schedule_cron=s.schedule_cron,
         enabled=s.enabled,
         max_stocks=s.max_stocks,
+        notify_wechat=s.notify_wechat,
         created_at=s.created_at,
         updated_at=s.updated_at,
         total_picks=len(s.picks),
@@ -62,6 +63,7 @@ def create_strategy(data: StrategyCreate, db: Session = Depends(get_db)):
         query_text=data.query_text,
         schedule_cron=data.schedule_cron,
         enabled=data.enabled,
+        notify_wechat=data.notify_wechat,
     )
     db.add(s)
     db.commit()
@@ -86,6 +88,8 @@ def update_strategy(sid: int, data: StrategyUpdate, db: Session = Depends(get_db
         s.enabled = data.enabled
     if data.max_stocks is not None:
         s.max_stocks = data.max_stocks or None
+    if data.notify_wechat is not None:
+        s.notify_wechat = data.notify_wechat
     db.commit()
     db.refresh(s)
     return _to_out(s)
@@ -135,6 +139,15 @@ def run_strategy_now(sid: int, db: Session = Depends(get_db)):
         # Don't 500 — caller wants the message
         return {"ok": False, "message": result.get("message", ""),
                 "errors": result.get("errors", [])}
+    # 手动跑批与定时跑批行为一致：开了微信推送且命中 > 0 → 推建议单
+    notify_msg = None
+    if (result.get("batch_id") or 0) > 0 and (result.get("hit_count") or 0) > 0:
+        try:
+            from bot.order_notifier import maybe_push_after_pick
+            notify_msg = maybe_push_after_pick(sid, result["batch_id"]).get("message")
+        except Exception as ne:
+            logger.warning(f"manual run notify failed: {ne}")
     return {"ok": True, "batch_id": result.get("batch_id"),
             "hit_count": result.get("hit_count"),
-            "message": result.get("message")}
+            "message": result.get("message"),
+            "notify": notify_msg}

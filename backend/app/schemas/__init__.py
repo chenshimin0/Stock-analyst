@@ -242,6 +242,7 @@ class StrategyOut(BaseModel):
     schedule_cron: str
     enabled: bool
     max_stocks: Optional[int] = None
+    notify_wechat: bool = False
     created_at: datetime
     updated_at: datetime
     total_picks: int = 0
@@ -256,6 +257,7 @@ class StrategyCreate(BaseModel):
     schedule_cron: str = "14:30"
     enabled: bool = True
     max_stocks: Optional[int] = None
+    notify_wechat: bool = False
 
 
 class StrategyUpdate(BaseModel):
@@ -264,5 +266,55 @@ class StrategyUpdate(BaseModel):
     schedule_cron: Optional[str] = None
     enabled: Optional[bool] = None
     max_stocks: Optional[int] = None
+    notify_wechat: Optional[bool] = None
 
     model_config = {"from_attributes": True}
+
+
+# =========================================================================
+# Order suggestions (semi-auto trading, pushed to WeChat via ServerChan)
+# =========================================================================
+
+class OrderSuggestionOut(BaseModel):
+    id: int
+    batch_id: int
+    strategy_id: int
+    stock_code: str
+    stock_name: str
+    suggested_price: Optional[float] = None
+    shares: int
+    amount: float
+    risk_ok: bool
+    risk_note: Optional[str] = None
+    status: str
+    pushed: bool
+    pushed_at: Optional[datetime] = None
+    created_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+class OrderSuggestionStatusUpdate(BaseModel):
+    status: str  # pending | bought | ignored
+
+
+class OrderGenerateRequest(BaseModel):
+    batch_id: Optional[int] = None  # 缺省 = 该策略最新批次（须先填 strategy_id）
+    strategy_id: Optional[int] = None
+    push: bool = True
+
+
+class OrderConfigOut(BaseModel):
+    per_order_amount: float
+    max_daily_amount: float
+    max_shares_per_stock: Optional[int] = None
+    push_enabled: bool
+
+    model_config = {"from_attributes": True}
+
+
+class OrderConfigUpdate(BaseModel):
+    per_order_amount: Optional[float] = None
+    max_daily_amount: Optional[float] = None
+    max_shares_per_stock: Optional[int] = None
+    push_enabled: Optional[bool] = None

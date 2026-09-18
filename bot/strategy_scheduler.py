@@ -63,6 +63,14 @@ def _safe_pick_one(sid: int) -> None:
     try:
         r = run_one_strategy(sid)
         logger.info(f"strategy #{sid} pick -> ok={r['ok']} batch={r.get('batch_id')} hits={r.get('hit_count')}")
+        # 半自动下单：策略开了 notify_wechat 且跑批有结果 → 生成建议单并推微信
+        if r.get("ok") and r.get("batch_id") and (r.get("hit_count") or 0) > 0:
+            try:
+                from order_notifier import maybe_push_after_pick
+                nr = maybe_push_after_pick(sid, r["batch_id"])
+                logger.info(f"strategy #{sid} wechat notify -> {nr.get('message')}")
+            except Exception as ne:
+                logger.error(f"strategy #{sid} wechat notify crashed: {ne}\n{traceback.format_exc()}")
     except Exception as e:
         logger.error(f"strategy #{sid} pick crashed: {e}\n{traceback.format_exc()}")
 

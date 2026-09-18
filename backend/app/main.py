@@ -7,9 +7,11 @@ from app.config import CORS_ORIGINS
 from app.database import engine, Base
 from app.models import Report, PriceSnapshot, WinRate, SectorPick, SectorPickStock, SectorMemberCache
 from app.models import StrategyPick, StrategyPickStock, Strategy
+from app.models.order_suggestion import OrderSuggestion, OrderConfig
 from app.models.sector_pick import Base as SectorPickBase
 from app.models.strategy import Base as StrategyBase
 from app.routers import reports, stocks, sector, sector_picks, strategy, strategies
+from app.routers import order_suggestions as order_suggestions_router
 
 Base.metadata.create_all(bind=engine)
 SectorPickBase.metadata.create_all(bind=engine)
@@ -40,6 +42,18 @@ try:
 except Exception:
     pass
 
+# Migration: strategies.notify_wechat (跑批后推送微信建议单开关)
+try:
+    from sqlalchemy import text, inspect
+    inspector = inspect(engine)
+    cols = [c["name"] for c in inspector.get_columns("strategies")]
+    if "notify_wechat" not in cols:
+        with engine.connect() as conn:
+            conn.execute(text("ALTER TABLE strategies ADD COLUMN notify_wechat BOOLEAN NOT NULL DEFAULT 0"))
+            conn.commit()
+except Exception:
+    pass
+
 app = FastAPI(title="Stock Analysis Report System", version="1.0.0")
 
 app.add_middleware(
@@ -56,6 +70,8 @@ app.include_router(sector.router, prefix="/api")
 app.include_router(sector_picks.router, prefix="/api")
 app.include_router(strategy.router, prefix="/api")
 app.include_router(strategies.router, prefix="/api")
+app.include_router(order_suggestions_router.router, prefix="/api")
+app.include_router(order_suggestions_router.config_router, prefix="/api")
 
 # Serve frontend in production
 frontend_dist = Path(__file__).parent.parent.parent / "frontend" / "dist"

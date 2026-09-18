@@ -116,6 +116,13 @@ export default function Strategies() {
                 <td style={td}>
                   <span style={{
                     padding: '2px 8px', borderRadius: 4, fontSize: 12,
+                    background: s.notify_wechat ? '#e3f2fd' : '#f5f5f5',
+                    color: s.notify_wechat ? '#1565c0' : '#666',
+                  }}>{s.notify_wechat ? '📧 开' : '关'}</span>
+                </td>
+                <td style={td}>
+                  <span style={{
+                    padding: '2px 8px', borderRadius: 4, fontSize: 12,
                     background: s.enabled ? '#e8f5e9' : '#f5f5f5',
                     color: s.enabled ? '#2e7d32' : '#666',
                   }}>{s.enabled ? '启用' : '停用'}</span>
