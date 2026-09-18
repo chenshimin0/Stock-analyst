@@ -5,7 +5,7 @@ import {
   deleteStrategy, toggleStrategy, runStrategyNow,
 } from '../api/strategies.js';
 
-const EMPTY_FORM = { name: '', query_text: '', schedule_cron: '14:30', enabled: true, max_stocks: '' };
+const EMPTY_FORM = { name: '', query_text: '', schedule_cron: '14:30', enabled: true, max_stocks: '', notify_wechat: false };
 
 export default function Strategies() {
   const [items, setItems] = useState([]);
@@ -100,6 +100,7 @@ export default function Strategies() {
               <th style={th}>名称</th>
               <th style={th}>调度</th>
               <th style={th}>保留</th>
+              <th style={th}>微信推送</th>
               <th style={th}>状态</th>
               <th style={th}>批次</th>
               <th style={th}>上次跑批</th>
@@ -117,8 +118,8 @@ export default function Strategies() {
                   <span style={{
                     padding: '2px 8px', borderRadius: 4, fontSize: 12,
                     background: s.notify_wechat ? '#e3f2fd' : '#f5f5f5',
-                    color: s.notify_wechat ? '#1565c0' : '#666',
-                  }}>{s.notify_wechat ? '📧 开' : '关'}</span>
+                    color: s.notify_wechat ? '#1565c0' : '#999',
+                  }}>{s.notify_wechat ? '📧 推送开' : '推送关'}</span>
                 </td>
                 <td style={td}>
                   <span style={{
@@ -173,6 +174,7 @@ export default function Strategies() {
             name: editing.name, query_text: editing.query_text,
             schedule_cron: editing.schedule_cron, enabled: editing.enabled,
             max_stocks: editing.max_stocks || '',
+            notify_wechat: !!editing.notify_wechat,
           }}
           onSave={handleSave}
           onCancel={() => setEditing(null)}
@@ -216,7 +218,14 @@ function StrategyForm({ initial, onSave, onCancel }) {
         <label>
           <input type="checkbox" checked={form.enabled}
                  onChange={e => setForm({...form, enabled: e.target.checked})} />
-          {' '}启用
+          {' '}启用（按调度时间自动跑批）
+        </label>
+      </div>
+      <div style={{ marginBottom: 12 }}>
+        <label>
+          <input type="checkbox" checked={!!form.notify_wechat}
+                 onChange={e => setForm({...form, notify_wechat: e.target.checked})} />
+          {' '}📧 跑批后推送微信建议单
         </label>
       </div>
       <button onClick={() => onSave(form)}
